@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';">
+    <title>水印清理工作台</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <div>
+            <div class="eyebrow">WATERMARK LAB</div>
+            <h1>水印清理工作台</h1>
+          </div>
+        </div>
+
+        <div class="login-cluster">
+          <div id="loginPill" class="status-pill is-offline">
+            <span class="status-dot"></span>
+            <span id="loginText">正在检查豆包状态</span>
+          </div>
+          <button id="loginButton" class="button secondary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+            <span id="loginButtonText">登录豆包</span>
+          </button>
+          <button id="logoutButton" class="logout-button is-hidden" type="button">退出登录</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="queue-panel panel">
+          <div class="panel-head">
+            <div>
+              <span class="section-number">01</span>
+              <h2>处理队列</h2>
+              <p>逐张上传，串行处理，避免对话结果错位</p>
+            </div>
+            <div class="queue-tools">
+              <span id="queueCount" class="count-badge">0 张</span>
+            </div>
+          </div>
+
+          <button id="dropZone" class="drop-zone" type="button">
+            <span class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>
+            </span>
+            <span class="drop-copy">
+              <strong>拖入图片，或点击选择</strong>
+              <small>支持 JPG、PNG、WEBP、HEIC 等格式 · 单张不超过 80 MB</small>
+            </span>
+            <span class="select-chip">选择图片</span>
+          </button>
+
+          <div id="emptyState" class="empty-state">
+            <div class="empty-grid" aria-hidden="true"></div>
+            <p>等待添加原图</p>
+            <span>处理进度与导出方式会显示在这里</span>
+          </div>
+          <div id="queueListToolbar" class="queue-list-toolbar is-hidden">
+            <label class="select-all-control" title="全选 / 取消全选">
+              <input id="selectAllCheckbox" type="checkbox" checked>
+              <span>全选</span>
+            </label>
+            <button id="clearButton" class="text-button" type="button">清空</button>
+            <label class="interval-control" title="每张图片处理完成后等待的秒数；多线程模式下由系统自动控制节奏">
+              <span>任务间隔</span>
+              <input id="intervalSeconds" type="number" min="0" max="600" step="1" value="30">
+              <span>秒</span>
+            </label>
+            <label class="parallel-control" title="开启后同时处理多张图片（最多 3 个豆包窗口并行）；若频繁触发安全验证请关闭">
+              <input id="parallelProcessing" type="checkbox">
+              <span>多线程</span>
+            </label>
+            <label class="interval-control" title="豆包回复结束后，继续等待图片出现的秒数；超过后判定为未生成。图片出得慢、被误判“没有生成图片”时可调大">
+              <span>无图等待</span>
+              <input id="imageWaitSeconds" type="number" min="5" max="300" step="1" value="30">
+              <span>秒</span>
+            </label>
+          </div>
+          <div id="queueList" class="queue-list" aria-live="polite"></div>
+        </section>
+
+        <aside class="settings-panel panel">
+          <div class="panel-head compact">
+            <div>
+              <span class="section-number">02</span>
+              <h2>处理设置</h2>
+              <p>使用已验证的稳定处理方案</p>
+            </div>
+          </div>
+
+          <div class="settings-scroll simplified-settings">
+            <div class="strategy-summary">
+              <div class="strategy-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>
+              </div>
+              <div>
+                <strong>自动保持原图比例</strong>
+                <span id="strategySummaryText">顶部添加 10% 临时隔离带，裁切补偿 0.5%。</span>
+              </div>
+              <button id="advancedSettingsButton" class="gear-button" type="button" title="高级设置" aria-label="打开高级设置">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h8M16 17h4"/><circle cx="16" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="14" cy="17" r="2"/></svg>
+              </button>
+            </div>
+
+            <div class="setting-row switch-row debug-window-setting">
+              <div>
+                <strong>显示豆包处理窗口</strong>
+                <span>关闭后在后台处理；安全验证时仍会临时显示</span>
+              </div>
+              <label class="switch">
+                <input id="showBrowserWindow" type="checkbox" checked>
+                <span></span>
+              </label>
+            </div>
+
+            <div class="appearance-card">
+              <div class="appearance-title">
+                <div>
+                  <strong>界面外观</strong>
+                  <span>选择深浅模式与玻璃色调</span>
+                </div>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.2-.8-2-2-2h-1.5a2.5 2.5 0 0 1-2.5-2.5V6c0-1.8-1.2-3-3-3Z"/><circle cx="7.5" cy="11" r=".8"/><circle cx="10" cy="7.5" r=".8"/><circle cx="8.5" cy="15" r=".8"/></svg>
+              </div>
+              <div id="themeModeControl" class="theme-segments" aria-label="界面明暗模式">
+                <button type="button" data-theme-mode="auto">自动</button>
+                <button type="button" data-theme-mode="light">浅色</button>
+                <button type="button" data-theme-mode="dark">深色</button>
+              </div>
+              <div id="paletteControl" class="palette-row" aria-label="界面调色盘">
+                <button type="button" data-palette="forest" title="森屿绿"><span></span></button>
+                <button type="button" data-palette="ocean" title="湖海蓝"><span></span></button>
+                <button type="button" data-palette="violet" title="暮光紫"><span></span></button>
+                <button type="button" data-palette="sunset" title="落日橙"><span></span></button>
+                <button type="button" data-palette="graphite" title="石墨灰"><span></span></button>
+              </div>
+              <div class="custom-color-row">
+                <span>自定义主题色</span>
+                <label id="customColorControl" class="custom-color-control" title="选择任意颜色">
+                  <input id="themeColor" type="color" value="#246b55" aria-label="选择自定义主题色">
+                  <span class="custom-color-preview" aria-hidden="true"></span>
+                  <output id="themeColorValue">#246B55</output>
+                </label>
+              </div>
+            </div>
+
+            <div class="setting-group output-group">
+              <label class="field-label">输出目录</label>
+              <button id="outputButton" class="path-button" type="button">
+                <span id="outputPath">请选择文件夹</span>
+                <em>更改</em>
+              </button>
+              <div class="output-hint">处理完成的图片会自动保存到这里</div>
+            </div>
+          </div>
+        </aside>
+      </main>
+
+      <footer class="action-bar">
+        <div class="action-note">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 8v5M12 17h.01"/></svg>
+          <span>出现安全验证时任务会暂停并打开豆包窗口，请手动完成后继续。</span>
+        </div>
+        <div class="action-buttons">
+          <button id="openOutputButton" class="button ghost" type="button">打开输出目录</button>
+          <button id="cancelButton" class="button danger is-hidden" type="button">停止任务</button>
+          <button id="startButton" class="button primary" type="button" disabled>
+            <span class="button-label">开始批量处理</span>
+            <span class="button-count" id="startCount">0</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+      </footer>
+    </div>
+
+    <div id="advancedSettingsModal" class="advanced-modal is-hidden" aria-hidden="true">
+      <div id="advancedSettingsBackdrop" class="preview-backdrop"></div>
+      <section class="advanced-dialog" role="dialog" aria-modal="true" aria-labelledby="advancedSettingsTitle">
+        <header class="advanced-head">
+          <div>
+            <strong id="advancedSettingsTitle">高级处理设置</strong>
+            <span>调整后会自动保存，并应用到下一次任务</span>
+          </div>
+          <button id="advancedSettingsClose" class="preview-close" type="button" aria-label="关闭高级设置">×</button>
+        </header>
+        <div class="advanced-body">
+          <div class="advanced-field">
+            <div class="advanced-label-line">
+              <label for="advancedPrompt">豆包提示词</label>
+              <span><output id="advancedPromptCount">0</output> / 4000</span>
+            </div>
+            <textarea id="advancedPrompt" maxlength="4000" rows="6" spellcheck="false"></textarea>
+          </div>
+
+          <div class="advanced-field">
+            <div class="advanced-label-line">
+              <label for="advancedManualPrompt">涂抹重绘提示词</label>
+              <span><output id="advancedManualPromptCount">0</output> / 4000</span>
+            </div>
+            <textarea id="advancedManualPrompt" maxlength="4000" rows="6" spellcheck="false"></textarea>
+            <span class="advanced-hint">手动涂抹后发送给豆包的局部修复指令；留空则恢复默认</span>
+          </div>
+
+          <div class="advanced-grid">
+            <div class="advanced-field">
+              <label for="advancedCropEdge">隔离带与裁切位置</label>
+              <select id="advancedCropEdge">
+                <option value="top">顶部</option>
+                <option value="bottom">底部</option>
+              </select>
+            </div>
+            <div class="advanced-field">
+              <div class="advanced-label-line">
+                <label for="advancedCropPercent">隔离带与基础裁切比例</label>
+                <output id="advancedCropPercentOutput">10%</output>
+              </div>
+              <input id="advancedCropPercent" type="range" min="10" max="25" step="1" value="10">
+              <span class="advanced-hint">比例越大，越容易完整容纳 AI 标识</span>
+            </div>
+          </div>
+
+          <div class="advanced-field compensation-field">
+            <div class="advanced-label-line">
+              <label for="advancedCompensation">白边补偿裁切</label>
+              <output id="advancedCompensationOutput">0.5%</output>
+            </div>
+            <input id="advancedCompensation" type="range" min="0" max="3" step="0.1" value="0.5">
+            <span class="advanced-hint">恢复原图比例后再向内裁少量边缘；建议保持 0.5%</span>
+          </div>
+        </div>
+        <footer class="advanced-actions">
+          <button id="advancedSettingsCancel" class="button ghost" type="button">取消</button>
+          <button id="advancedSettingsSave" class="button primary compact-primary" type="button">保存设置</button>
+        </footer>
+      </section>
+    </div>
+
+    <div id="previewModal" class="preview-modal is-hidden" aria-hidden="true">
+      <div id="previewBackdrop" class="preview-backdrop"></div>
+      <section class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+        <header class="preview-head">
+          <div>
+            <strong id="previewTitle">处理结果预览</strong>
+            <span id="previewMeta">正在载入…</span>
+          </div>
+          <div class="preview-head-actions">
+            <div class="preview-zoom-controls" aria-label="预览缩放">
+              <button id="previewZoomOut" type="button" title="缩小（⌘-）" aria-label="缩小">−</button>
+              <button id="previewZoomReset" type="button" title="适合窗口（⌘0）"><span id="previewZoomValue">适合</span></button>
+              <button id="previewZoomIn" type="button" title="放大（⌘+）" aria-label="放大">+</button>
+            </div>
+            <button id="previewClose" class="preview-close" type="button" aria-label="关闭预览">×</button>
+          </div>
+        </header>
+        <div id="previewStage" class="preview-stage">
+          <span id="previewLoading" class="preview-loading">正在载入预览…</span>
+          <img id="previewImage" class="is-hidden" alt="处理结果预览" draggable="false">
+          <div class="preview-help">⌘ + / − 缩放 · ⌘ 0 还原 · 放大后拖拽查看</div>
+        </div>
+      </section>
+    </div>
+
+    <div id="manualEditorModal" class="manual-editor-modal is-hidden" aria-hidden="true">
+      <div id="manualEditorBackdrop" class="preview-backdrop"></div>
+      <section class="manual-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="manualEditorTitle">
+        <header class="manual-editor-head">
+          <div>
+            <strong id="manualEditorTitle">手动涂抹局部重绘区域</strong>
+            <span id="manualEditorMeta">在原图上标记需要豆包重新处理的位置</span>
+          </div>
+          <button id="manualEditorClose" class="preview-close" type="button" aria-label="关闭手动涂抹">×</button>
+        </header>
+        <div id="manualEditorStage" class="manual-editor-stage">
+          <span id="manualEditorLoading" class="preview-loading">正在载入原图…</span>
+          <canvas id="manualEditorCanvas" class="is-hidden" aria-label="原图涂抹画布"></canvas>
+          <div id="manualBrushCursor" class="manual-brush-cursor is-hidden" aria-hidden="true"></div>
+          <div class="manual-editor-tip">用亮粉色画笔覆盖需要重新处理的区域</div>
+        </div>
+        <footer class="manual-editor-toolbar">
+          <div class="brush-control">
+            <span class="brush-dot" aria-hidden="true"></span>
+            <label for="manualBrushSize">画笔大小</label>
+            <input id="manualBrushSize" type="range" min="0.8" max="10" step="0.2" value="3">
+            <output id="manualBrushSizeValue">3%</output>
+          </div>
+          <div class="manual-editor-note">只会将涂抹区域作为局部修复指示发送给豆包</div>
+          <div class="manual-editor-actions">
+            <button id="manualUndo" class="button ghost" type="button" disabled>撤销</button>
+            <button id="manualClear" class="button ghost" type="button" disabled>清空</button>
+            <button id="manualEditorCancel" class="button ghost" type="button">取消</button>
+            <button id="manualEditorSend" class="button primary compact-primary" type="button" disabled>发送局部重绘</button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';">
+    <title>处理结果预览</title>
+    <link rel="stylesheet" href="preview-window.css">
+  </head>
+  <body>
+    <main class="preview-shell">
+      <header class="preview-toolbar">
+        <div class="preview-title-block">
+          <strong id="previewTitle">处理结果预览</strong>
+          <span id="previewMeta">正在载入…</span>
+        </div>
+        <div class="preview-zoom-controls" aria-label="预览缩放">
+          <button id="zoomOut" type="button" title="缩小（⌘-）" aria-label="缩小">−</button>
+          <button id="zoomReset" type="button" title="适合窗口（⌘0）"><span id="zoomValue">适合</span></button>
+          <button id="zoomIn" type="button" title="放大（⌘+）" aria-label="放大">+</button>
+        </div>
+      </header>
+      <section id="previewStage" class="preview-stage">
+        <span id="previewLoading" class="preview-loading">正在载入预览…</span>
+        <img id="previewImage" class="is-hidden" alt="处理结果预览" draggable="false">
+        <div class="preview-help">⌘ + / − 缩放 · ⌘ 0 还原 · 放大后拖拽查看</div>
+      </section>
+    </main>
+    <script src="preview-window.js"></script>
+  </body>
+</html>

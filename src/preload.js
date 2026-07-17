@@ -1,0 +1,33 @@
+'use strict';
+
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+contextBridge.exposeInMainWorld('watermarkLab', {
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  saveSettings: (settings) => ipcRenderer.invoke('settings:save', settings),
+  getQueueRecords: () => ipcRenderer.invoke('queue:get'),
+  saveQueueRecords: (records) => ipcRenderer.invoke('queue:save', records),
+  openLogin: () => ipcRenderer.invoke('login:open'),
+  logout: () => ipcRenderer.invoke('login:logout'),
+  getLoginStatus: () => ipcRenderer.invoke('login:status'),
+  selectImages: () => ipcRenderer.invoke('files:select'),
+  validatePaths: (paths) => ipcRenderer.invoke('files:validate', paths),
+  getImagePreview: (targetPath) => ipcRenderer.invoke('image:preview', targetPath),
+  openPreviewWindow: (targetPath) => ipcRenderer.invoke('image:open-preview', targetPath),
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  chooseOutput: (current) => ipcRenderer.invoke('output:select', current),
+  startBatch: (payload) => ipcRenderer.invoke('batch:start', payload),
+  startManualEdit: (payload) => ipcRenderer.invoke('manual:start', payload),
+  cancelBatch: () => ipcRenderer.invoke('batch:cancel'),
+  openPath: (targetPath) => ipcRenderer.invoke('path:open', targetPath),
+  onLoginStatus: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('login:status', listener);
+    return () => ipcRenderer.removeListener('login:status', listener);
+  },
+  onBatchEvent: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('batch:event', listener);
+    return () => ipcRenderer.removeListener('batch:event', listener);
+  }
+});

@@ -1,0 +1,57 @@
+{
+  "name": "doubao-watermark-lab",
+  "version": "1.0.0",
+  "description": "基于 Electron 和豆包网页版的批量图片去水印工作台",
+  "main": "src/main.js",
+  "author": "Watermark Lab",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/preview-preload.js && node --check src/doubao-automation.js && node --check src/image-pipeline.js && node --check src/renderer/app.js && node --check src/renderer/preview-window.js",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "43.1.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.watermarklab.doubao",
+    "productName": "水印清理工作台",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "src/assets/app-icon.png",
+      "category": "public.app-category.graphics-design",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "src/assets/app-icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${os}-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
+    },
+    "linux": {
+      "icon": "src/assets/app-icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  }
+}
