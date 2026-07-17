@@ -44,9 +44,9 @@ const DEFAULT_SETTINGS = {
   cropPercent: 10,
   cropCompensationPercent: 0.5,
   intervalSeconds: 30,
-  imageWaitSeconds: 30,
+  imageWaitSeconds: 60,
   parallelProcessing: false,
-  showBrowserWindow: true,
+  showBrowserWindow: false,
   themeMode: 'auto',
   colorPalette: 'forest',
   themeColor: PALETTE_COLORS.forest,
@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS = {
 let mainWindow;
 let doubaoWindow;
 let previewWindow;
+let manualWindow;
 let loginTimer;
 let loginFlowActive = false;
 let running = false;
@@ -106,7 +107,7 @@ function sanitizeSettings(input = {}) {
     cropPercent: Math.min(25, Math.max(10, Number(input.cropPercent) || 10)),
     cropCompensationPercent: Math.min(3, Math.max(0, Number(input.cropCompensationPercent) || 0)),
     intervalSeconds: Math.min(600, Math.max(0, Number.isFinite(Number(input.intervalSeconds)) ? Math.round(Number(input.intervalSeconds)) : 30)),
-    imageWaitSeconds: Math.min(300, Math.max(5, Number.isFinite(Number(input.imageWaitSeconds)) ? Math.round(Number(input.imageWaitSeconds)) : 30)),
+    imageWaitSeconds: Math.min(300, Math.max(5, Number.isFinite(Number(input.imageWaitSeconds)) ? Math.round(Number(input.imageWaitSeconds)) : 60)),
     parallelProcessing: input.parallelProcessing === true,
     showBrowserWindow: input.showBrowserWindow !== false,
     themeMode: THEME_MODES.has(input.themeMode) ? input.themeMode : 'auto',
@@ -770,6 +771,10 @@ async function runManualEdit(payload = {}) {
   const sourcePath = typeof payload.sourcePath === 'string' ? path.resolve(payload.sourcePath) : '';
   const [source] = await validateImagePaths([sourcePath]);
   if (!source) throw new Error('原图不存在或格式不受支持');
+  // 涂抹发送也要接回该图片的历史会话（没有历史会话时自动化层会自动开新对话）
+  const conversationId = typeof payload.conversationId === 'string' && /^[0-9a-zA-Z_-]{6,64}$/.test(payload.conversationId)
+    ? payload.conversationId
+    : '';
   const markedUpload = await prepareManualMarkedUpload({
     sourcePath: source.path,
     nativeImage,
@@ -789,7 +794,8 @@ async function runManualEdit(payload = {}) {
         path: markedUpload.path,
         name: path.basename(markedUpload.path),
         width: markedUpload.width,
-        height: markedUpload.height
+        height: markedUpload.height,
+        conversationId
       }]
     });
   } finally {
@@ -869,6 +875,55 @@ async function openImagePreviewWindow(targetPath) {
   return true;
 }
 
+async function openManualEditWindow(payload = {}) {
+  const sourcePath = typeof payload.path === 'string' ? payload.path : '';
+  if (!sourcePath || !path.isAbsolute(sourcePath)) throw new Error('涂抹原图路径无效');
+  if (!SUPPORTED_EXTENSIONS.has(path.extname(sourcePath).toLowerCase())) {
+    throw new Error('该文件格式不支持涂抹');
+  }
+  const file = { path: sourcePath, name: path.basename(sourcePath) };
+  if (manualWindow && !manualWindow.isDestroyed()) {
+    manualWindow.setTitle(`手动涂抹 · ${file.name}`);
+    manualWindow.webContents.send('manual:load', file);
+    if (manualWindow.isMinimized()) manualWindow.restore();
+    manualWindow.show();
+    manualWindow.focus();
+    return true;
+  }
+
+  manualWindow = new BrowserWindow({
+    width: 1120,
+    height: 800,
+    minWidth: 760,
+    minHeight: 520,
+    backgroundColor: '#101714',
+    icon: APP_ICON_PATH,
+    title: `手动涂抹 · ${file.name}`,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 18 } : undefined,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'manual-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  manualWindow.loadFile(path.join(__dirname, 'renderer', 'manual-window.html'));
+  manualWindow.once('ready-to-show', () => {
+    if (!manualWindow || manualWindow.isDestroyed()) return;
+    manualWindow.show();
+    manualWindow.focus();
+  });
+  manualWindow.webContents.once('did-finish-load', () => {
+    if (manualWindow && !manualWindow.isDestroyed()) manualWindow.webContents.send('manual:load', file);
+  });
+  manualWindow.on('closed', () => {
+    manualWindow = null;
+  });
+  return true;
+}
+
 function registerIpc() {
   ipcMain.handle('settings:get', loadSettings);
   ipcMain.handle('settings:save', (_event, value) => saveSettings(value));
@@ -888,6 +943,19 @@ function registerIpc() {
   ipcMain.handle('files:validate', (_event, paths) => validateImagePaths(paths));
   ipcMain.handle('image:preview', (_event, targetPath) => getImagePreviewData(targetPath));
   ipcMain.handle('image:open-preview', (_event, targetPath) => openImagePreviewWindow(targetPath));
+  ipcMain.handle('manual:open', (_event, payload) => openManualEditWindow(payload));
+  ipcMain.on('manual:submit', (_event, payload) => {
+    if (manualWindow && !manualWindow.isDestroyed()) manualWindow.close();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('manual:submitted', payload);
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+  ipcMain.on('manual:close', () => {
+    if (manualWindow && !manualWindow.isDestroyed()) manualWindow.close();
+  });
   ipcMain.handle('output:select', async (_event, currentDirectory) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择输出文件夹',

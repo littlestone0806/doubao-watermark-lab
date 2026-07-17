@@ -36,8 +36,20 @@ function applyTransform() {
   elements.zoomIn.disabled = zoom >= ZOOM_LEVELS.at(-1);
 }
 
-function setZoom(value) {
-  zoom = Math.min(ZOOM_LEVELS.at(-1), Math.max(ZOOM_LEVELS[0], value));
+function setZoom(value, anchorClientX, anchorClientY) {
+  const nextZoom = Math.min(ZOOM_LEVELS.at(-1), Math.max(ZOOM_LEVELS[0], value));
+  if (nextZoom === zoom) return;
+  // 以锚点（通常是鼠标指针位置，未传入时为舞台中心）为中心缩放：
+  // 缩放前后保持锚点下的图像点不动
+  const stageRectangle = elements.stage.getBoundingClientRect();
+  const anchorX = (typeof anchorClientX === 'number' ? anchorClientX : stageRectangle.left + stageRectangle.width / 2)
+    - (stageRectangle.left + stageRectangle.width / 2);
+  const anchorY = (typeof anchorClientY === 'number' ? anchorClientY : stageRectangle.top + stageRectangle.height / 2)
+    - (stageRectangle.top + stageRectangle.height / 2);
+  const ratio = nextZoom / zoom;
+  panX = panX * ratio + anchorX * (1 - ratio);
+  panY = panY * ratio + anchorY * (1 - ratio);
+  zoom = nextZoom;
   if (zoom <= 1) {
     panX = 0;
     panY = 0;
@@ -45,11 +57,11 @@ function setZoom(value) {
   applyTransform();
 }
 
-function stepZoom(direction) {
+function stepZoom(direction, anchorClientX, anchorClientY) {
   const next = direction > 0
     ? ZOOM_LEVELS.find((level) => level > zoom + 0.001)
     : [...ZOOM_LEVELS].reverse().find((level) => level < zoom - 0.001);
-  if (next) setZoom(next);
+  if (next) setZoom(next, anchorClientX, anchorClientY);
 }
 
 function resetView() {
@@ -77,11 +89,11 @@ window.previewBridge.onLoad((preview) => {
 elements.zoomOut.addEventListener('click', () => stepZoom(-1));
 elements.zoomIn.addEventListener('click', () => stepZoom(1));
 elements.zoomReset.addEventListener('click', resetView);
-elements.stage.addEventListener('dblclick', () => setZoom(zoom === 1 ? 2 : 1));
+elements.stage.addEventListener('dblclick', (event) => setZoom(zoom === 1 ? 2 : 1, event.clientX, event.clientY));
 elements.stage.addEventListener('wheel', (event) => {
   event.preventDefault();
   if (event.metaKey || event.ctrlKey) {
-    stepZoom(event.deltaY < 0 ? 1 : -1);
+    stepZoom(event.deltaY < 0 ? 1 : -1, event.clientX, event.clientY);
   } else if (zoom > 1) {
     panX -= event.deltaX;
     panY -= event.deltaY;

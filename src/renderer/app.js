@@ -51,21 +51,6 @@ const elements = {
   previewZoomReset: document.querySelector('#previewZoomReset'),
   previewZoomIn: document.querySelector('#previewZoomIn'),
   previewZoomValue: document.querySelector('#previewZoomValue'),
-  manualEditorModal: document.querySelector('#manualEditorModal'),
-  manualEditorBackdrop: document.querySelector('#manualEditorBackdrop'),
-  manualEditorTitle: document.querySelector('#manualEditorTitle'),
-  manualEditorMeta: document.querySelector('#manualEditorMeta'),
-  manualEditorClose: document.querySelector('#manualEditorClose'),
-  manualEditorStage: document.querySelector('#manualEditorStage'),
-  manualEditorLoading: document.querySelector('#manualEditorLoading'),
-  manualEditorCanvas: document.querySelector('#manualEditorCanvas'),
-  manualBrushCursor: document.querySelector('#manualBrushCursor'),
-  manualBrushSize: document.querySelector('#manualBrushSize'),
-  manualBrushSizeValue: document.querySelector('#manualBrushSizeValue'),
-  manualUndo: document.querySelector('#manualUndo'),
-  manualClear: document.querySelector('#manualClear'),
-  manualEditorCancel: document.querySelector('#manualEditorCancel'),
-  manualEditorSend: document.querySelector('#manualEditorSend'),
   advancedSettingsModal: document.querySelector('#advancedSettingsModal'),
   advancedSettingsBackdrop: document.querySelector('#advancedSettingsBackdrop'),
   advancedSettingsClose: document.querySelector('#advancedSettingsClose'),
@@ -107,7 +92,7 @@ function readSettings() {
     outputDirectory: state.settings.outputDirectory,
     showBrowserWindow: elements.showBrowserWindow.checked,
     intervalSeconds: Math.min(600, Math.max(0, Math.round(Number(elements.intervalSeconds.value) || 0))),
-    imageWaitSeconds: Math.min(300, Math.max(5, Math.round(Number(elements.imageWaitSeconds.value) || 30))),
+    imageWaitSeconds: Math.min(300, Math.max(5, Math.round(Number(elements.imageWaitSeconds.value) || 60))),
     parallelProcessing: elements.parallelProcessing.checked
   };
 }
@@ -126,7 +111,7 @@ function applySettings(settings) {
   applyAppearance(settings);
   elements.showBrowserWindow.checked = settings.showBrowserWindow;
   elements.intervalSeconds.value = String(settings.intervalSeconds ?? 30);
-  elements.imageWaitSeconds.value = String(settings.imageWaitSeconds ?? 30);
+  elements.imageWaitSeconds.value = String(settings.imageWaitSeconds ?? 60);
   elements.parallelProcessing.checked = settings.parallelProcessing === true;
   syncProcessingControls();
   elements.outputPath.textContent = settings.outputDirectory;
@@ -257,8 +242,20 @@ function applyPreviewTransform() {
   elements.previewZoomIn.disabled = previewZoom >= ZOOM_LEVELS.at(-1);
 }
 
-function setPreviewZoom(value) {
-  previewZoom = Math.min(ZOOM_LEVELS.at(-1), Math.max(ZOOM_LEVELS[0], value));
+function setPreviewZoom(value, anchorClientX, anchorClientY) {
+  const nextZoom = Math.min(ZOOM_LEVELS.at(-1), Math.max(ZOOM_LEVELS[0], value));
+  if (nextZoom === previewZoom) return;
+  // 以锚点（通常是鼠标指针位置，未传入时为舞台中心）为中心缩放：
+  // 缩放前后保持锚点下的图像点不动
+  const stageRectangle = elements.previewStage.getBoundingClientRect();
+  const anchorX = (typeof anchorClientX === 'number' ? anchorClientX : stageRectangle.left + stageRectangle.width / 2)
+    - (stageRectangle.left + stageRectangle.width / 2);
+  const anchorY = (typeof anchorClientY === 'number' ? anchorClientY : stageRectangle.top + stageRectangle.height / 2)
+    - (stageRectangle.top + stageRectangle.height / 2);
+  const ratio = nextZoom / previewZoom;
+  previewPanX = previewPanX * ratio + anchorX * (1 - ratio);
+  previewPanY = previewPanY * ratio + anchorY * (1 - ratio);
+  previewZoom = nextZoom;
   if (previewZoom <= 1) {
     previewPanX = 0;
     previewPanY = 0;
@@ -266,11 +263,11 @@ function setPreviewZoom(value) {
   applyPreviewTransform();
 }
 
-function stepPreviewZoom(direction) {
+function stepPreviewZoom(direction, anchorClientX, anchorClientY) {
   const next = direction > 0
     ? ZOOM_LEVELS.find((level) => level > previewZoom + 0.001)
     : [...ZOOM_LEVELS].reverse().find((level) => level < previewZoom - 0.001);
-  if (next) setPreviewZoom(next);
+  if (next) setPreviewZoom(next, anchorClientX, anchorClientY);
 }
 
 function resetPreviewView() {
@@ -301,158 +298,38 @@ async function openPreview(file) {
   }
 }
 
-let manualEditorFile = null;
-let manualBaseImage = null;
-let manualStrokes = [];
-let manualActiveStroke = null;
-let manualPointerId = null;
-let manualCursorPosition = { x: 0.5, y: 0.5 };
-
-function updateManualBrushCursor() {
-  const canvas = elements.manualEditorCanvas;
-  if (!manualBaseImage || canvas.classList.contains('is-hidden')
-      || elements.manualEditorModal.classList.contains('is-hidden')) {
-    elements.manualBrushCursor.classList.add('is-hidden');
-    return;
-  }
-  const stageRectangle = elements.manualEditorStage.getBoundingClientRect();
-  const canvasRectangle = canvas.getBoundingClientRect();
-  const brushPercent = Number(elements.manualBrushSize.value) || 3;
-  const diameter = Math.max(2, Math.min(canvasRectangle.width, canvasRectangle.height) * brushPercent / 100);
-  elements.manualBrushCursor.style.width = `${diameter}px`;
-  elements.manualBrushCursor.style.height = `${diameter}px`;
-  elements.manualBrushCursor.style.left = `${canvasRectangle.left - stageRectangle.left + manualCursorPosition.x * canvasRectangle.width}px`;
-  elements.manualBrushCursor.style.top = `${canvasRectangle.top - stageRectangle.top + manualCursorPosition.y * canvasRectangle.height}px`;
-  elements.manualBrushCursor.classList.remove('is-hidden');
-}
-
-function updateManualEditorControls() {
-  const hasStrokes = manualStrokes.length > 0;
-  elements.manualUndo.disabled = !hasStrokes;
-  elements.manualClear.disabled = !hasStrokes;
-  elements.manualEditorSend.disabled = !hasStrokes || state.running;
-  const brushValue = Number(elements.manualBrushSize.value) || 3;
-  elements.manualBrushSizeValue.value = `${brushValue.toFixed(brushValue % 1 ? 1 : 0)}%`;
-  elements.manualBrushSizeValue.textContent = elements.manualBrushSizeValue.value;
-}
-
-function redrawManualCanvas() {
-  const canvas = elements.manualEditorCanvas;
-  const context = canvas.getContext('2d');
-  if (!context || !manualBaseImage) return;
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(manualBaseImage, 0, 0, canvas.width, canvas.height);
-  const brushWidth = Math.min(canvas.width, canvas.height) * (Number(elements.manualBrushSize.value) || 3) / 100;
-  context.strokeStyle = 'rgba(255, 45, 143, .58)';
-  context.fillStyle = 'rgba(255, 45, 143, .58)';
-  context.lineWidth = brushWidth;
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  for (const stroke of manualStrokes) {
-    if (!stroke.length) continue;
-    if (stroke.length === 1) {
-      context.beginPath();
-      context.arc(stroke[0].x * canvas.width, stroke[0].y * canvas.height, brushWidth / 2, 0, Math.PI * 2);
-      context.fill();
-      continue;
-    }
-    context.beginPath();
-    context.moveTo(stroke[0].x * canvas.width, stroke[0].y * canvas.height);
-    for (const point of stroke.slice(1)) context.lineTo(point.x * canvas.width, point.y * canvas.height);
-    context.stroke();
-  }
-  updateManualEditorControls();
-  updateManualBrushCursor();
-}
-
-function closeManualEditor() {
-  if (elements.manualEditorModal.contains(document.activeElement)) document.activeElement.blur();
-  elements.manualEditorModal.classList.add('is-hidden');
-  elements.manualEditorModal.setAttribute('aria-hidden', 'true');
-  elements.manualEditorCanvas.classList.add('is-hidden');
-  elements.manualBrushCursor.classList.add('is-hidden');
-  elements.manualBrushCursor.classList.remove('is-painting');
-  elements.manualEditorLoading.classList.remove('is-hidden');
-  manualEditorFile = null;
-  manualBaseImage = null;
-  manualStrokes = [];
-  manualActiveStroke = null;
-  manualPointerId = null;
-  manualCursorPosition = { x: 0.5, y: 0.5 };
-}
-
 async function openManualEditor(file) {
   if (state.running) return;
-  manualEditorFile = file;
-  manualBaseImage = null;
-  manualStrokes = [];
-  manualActiveStroke = null;
-  manualCursorPosition = { x: 0.5, y: 0.5 };
-  elements.manualEditorTitle.textContent = `手动涂抹 · ${file.name}`;
-  elements.manualEditorMeta.textContent = '请在原图上覆盖需要豆包重新处理的位置';
-  elements.manualEditorLoading.classList.remove('is-hidden');
-  elements.manualEditorCanvas.classList.add('is-hidden');
-  elements.manualEditorModal.classList.remove('is-hidden');
-  elements.manualEditorModal.setAttribute('aria-hidden', 'false');
-  elements.manualEditorClose.focus();
-  updateManualEditorControls();
   try {
-    const preview = await api.getImagePreview(file.path);
-    if (manualEditorFile !== file) return;
-    const image = new Image();
-    image.onload = () => {
-      if (manualEditorFile !== file) return;
-      manualBaseImage = image;
-      elements.manualEditorCanvas.width = image.naturalWidth;
-      elements.manualEditorCanvas.height = image.naturalHeight;
-      elements.manualEditorMeta.textContent = `原图 ${preview.width} × ${preview.height} · 涂抹轨迹会按原始分辨率发送`;
-      elements.manualEditorLoading.classList.add('is-hidden');
-      elements.manualEditorCanvas.classList.remove('is-hidden');
-      redrawManualCanvas();
-      requestAnimationFrame(updateManualBrushCursor);
-    };
-    image.onerror = () => {
-      closeManualEditor();
-      toast('原图载入失败，无法进入手动涂抹', 'error');
-    };
-    image.src = preview.dataUrl;
+    await api.openManualWindow({ path: file.path, name: file.name });
   } catch (error) {
-    closeManualEditor();
     toast(error.message || String(error), 'error');
   }
 }
 
-function manualCanvasPoint(event) {
-  const rectangle = elements.manualEditorCanvas.getBoundingClientRect();
-  return {
-    x: Math.min(1, Math.max(0, (event.clientX - rectangle.left) / Math.max(1, rectangle.width))),
-    y: Math.min(1, Math.max(0, (event.clientY - rectangle.top) / Math.max(1, rectangle.height)))
-  };
-}
-
-async function sendManualEdit() {
-  if (!manualEditorFile || !manualStrokes.length || state.running) return;
-  const file = manualEditorFile;
-  const strokes = manualStrokes.map((stroke) => stroke.map((point) => ({ x: point.x, y: point.y })));
-  const brushPercent = Number(elements.manualBrushSize.value) || 3;
-  elements.manualEditorSend.disabled = true;
-  elements.manualEditorSend.textContent = '正在准备…';
-  closeManualEditor();
+async function handleManualSubmitted(payload = {}) {
+  const sourcePath = typeof payload.sourcePath === 'string' ? payload.sourcePath : '';
+  const strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
+  if (!sourcePath || !strokes.length) return;
+  if (state.running) {
+    toast('已有处理任务正在运行，请等待完成后再发送涂抹', 'error');
+    return;
+  }
+  const file = state.files.find((item) => item.path === sourcePath);
   setRunning(true);
-  updateFile(file.path, { status: 'active', message: '正在生成涂抹标记', progress: 5 });
+  if (file) updateFile(file.path, { status: 'active', message: '正在生成涂抹标记', progress: 5 });
   try {
     await api.startManualEdit({
-      sourcePath: file.path,
+      sourcePath,
       strokes,
-      brushPercent,
+      brushPercent: Number(payload.brushPercent) || 3,
+      conversationId: file?.conversationId || '',
       settings: readSettings()
     });
   } catch (error) {
     setRunning(false);
-    updateFile(file.path, { status: file.outputPath ? 'complete' : 'error', message: '' });
+    if (file) updateFile(file.path, { status: file.outputPath ? 'complete' : 'error', message: '' });
     toast(error.message || String(error), 'error');
-  } finally {
-    elements.manualEditorSend.textContent = '发送局部重绘';
   }
 }
 
@@ -840,12 +717,12 @@ elements.previewClose.addEventListener('click', closePreview);
 elements.previewZoomOut.addEventListener('click', () => stepPreviewZoom(-1));
 elements.previewZoomIn.addEventListener('click', () => stepPreviewZoom(1));
 elements.previewZoomReset.addEventListener('click', resetPreviewView);
-elements.previewStage.addEventListener('dblclick', () => setPreviewZoom(previewZoom === 1 ? 2 : 1));
+elements.previewStage.addEventListener('dblclick', (event) => setPreviewZoom(previewZoom === 1 ? 2 : 1, event.clientX, event.clientY));
 elements.previewStage.addEventListener('wheel', (event) => {
   if (elements.previewModal.classList.contains('is-hidden')) return;
   event.preventDefault();
   if (event.metaKey || event.ctrlKey) {
-    stepPreviewZoom(event.deltaY < 0 ? 1 : -1);
+    stepPreviewZoom(event.deltaY < 0 ? 1 : -1, event.clientX, event.clientY);
     return;
   }
   if (previewZoom > 1) {
@@ -875,62 +752,11 @@ function endPreviewDrag(event) {
 }
 elements.previewImage.addEventListener('pointerup', endPreviewDrag);
 elements.previewImage.addEventListener('pointercancel', endPreviewDrag);
-elements.manualEditorBackdrop.addEventListener('click', closeManualEditor);
-elements.manualEditorClose.addEventListener('click', closeManualEditor);
-elements.manualEditorCancel.addEventListener('click', closeManualEditor);
-elements.manualBrushSize.addEventListener('input', redrawManualCanvas);
-elements.manualUndo.addEventListener('click', () => {
-  manualStrokes.pop();
-  redrawManualCanvas();
-});
-elements.manualClear.addEventListener('click', () => {
-  manualStrokes = [];
-  manualActiveStroke = null;
-  redrawManualCanvas();
-});
-elements.manualEditorSend.addEventListener('click', sendManualEdit);
-elements.manualEditorCanvas.addEventListener('pointerdown', (event) => {
-  if (!manualBaseImage || event.button !== 0) return;
-  event.preventDefault();
-  manualPointerId = event.pointerId;
-  manualCursorPosition = manualCanvasPoint(event);
-  manualActiveStroke = [manualCursorPosition];
-  manualStrokes.push(manualActiveStroke);
-  elements.manualEditorCanvas.setPointerCapture(event.pointerId);
-  elements.manualBrushCursor.classList.add('is-painting');
-  redrawManualCanvas();
-});
-elements.manualEditorCanvas.addEventListener('pointermove', (event) => {
-  const point = manualCanvasPoint(event);
-  manualCursorPosition = point;
-  updateManualBrushCursor();
-  if (manualPointerId !== event.pointerId || !manualActiveStroke) return;
-  const previous = manualActiveStroke.at(-1);
-  if (Math.hypot(point.x - previous.x, point.y - previous.y) < 0.0015) return;
-  manualActiveStroke.push(point);
-  redrawManualCanvas();
-});
-elements.manualEditorCanvas.addEventListener('pointerenter', (event) => {
-  if (!manualBaseImage) return;
-  manualCursorPosition = manualCanvasPoint(event);
-  updateManualBrushCursor();
-});
-function endManualStroke(event) {
-  if (manualPointerId !== event.pointerId) return;
-  manualPointerId = null;
-  manualActiveStroke = null;
-  elements.manualBrushCursor.classList.remove('is-painting');
-  updateManualEditorControls();
-}
-elements.manualEditorCanvas.addEventListener('pointerup', endManualStroke);
-elements.manualEditorCanvas.addEventListener('pointercancel', endManualStroke);
 window.addEventListener('resize', () => {
   if (!elements.previewModal.classList.contains('is-hidden')) applyPreviewTransform();
-  if (!elements.manualEditorModal.classList.contains('is-hidden')) updateManualBrushCursor();
 });
 document.addEventListener('keydown', (event) => {
   const previewOpen = !elements.previewModal.classList.contains('is-hidden');
-  const manualEditorOpen = !elements.manualEditorModal.classList.contains('is-hidden');
   if (previewOpen && (event.metaKey || event.ctrlKey)) {
     if (event.key === '+' || event.key === '=') {
       event.preventDefault();
@@ -949,8 +775,7 @@ document.addEventListener('keydown', (event) => {
     }
   }
   if (event.key === 'Escape') {
-    if (manualEditorOpen) closeManualEditor();
-    else if (!elements.advancedSettingsModal.classList.contains('is-hidden')) closeAdvancedSettings();
+    if (!elements.advancedSettingsModal.classList.contains('is-hidden')) closeAdvancedSettings();
     else if (previewOpen) closePreview();
   }
 });
@@ -982,6 +807,7 @@ elements.startButton.addEventListener('click', async () => {
 
 api.onLoginStatus(updateLogin);
 api.onBatchEvent(handleBatchEvent);
+api.onManualSubmitted(handleManualSubmitted);
 
 async function initialize() {
   applySettings(await api.getSettings());

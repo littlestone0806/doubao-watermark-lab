@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';">
+    <title>手动涂抹</title>
+    <link rel="stylesheet" href="manual-window.css">
+  </head>
+  <body>
+    <main class="manual-shell">
+      <header class="manual-head">
+        <div class="manual-title-block">
+          <strong id="manualTitle">手动涂抹局部重绘区域</strong>
+          <span id="manualMeta">正在载入原图…</span>
+        </div>
+      </header>
+      <section id="manualStage" class="manual-stage">
+        <span id="manualLoading" class="manual-loading">正在载入原图…</span>
+        <canvas id="manualCanvas" class="is-hidden" aria-label="原图涂抹画布"></canvas>
+        <div id="manualBrushCursor" class="manual-brush-cursor is-hidden" aria-hidden="true"></div>
+        <div class="manual-tip">亮粉色画笔覆盖重绘区域 · ⌘/Ctrl+滚轮缩放 · 空格+拖拽平移</div>
+      </section>
+      <footer class="manual-toolbar">
+        <div class="brush-control">
+          <span class="brush-dot" aria-hidden="true"></span>
+          <label for="manualBrushSize">画笔大小</label>
+          <input id="manualBrushSize" type="range" min="0.8" max="10" step="0.2" value="3">
+          <output id="manualBrushSizeValue">3%</output>
+        </div>
+        <div class="manual-note">只会将涂抹区域作为局部修复指示发送给豆包</div>
+        <div class="manual-actions">
+          <button id="manualUndo" class="button ghost" type="button" disabled>撤销</button>
+          <button id="manualClear" class="button ghost" type="button" disabled>清空</button>
+          <button id="manualCancel" class="button ghost" type="button">取消</button>
+          <button id="manualSend" class="button primary" type="button" disabled>发送局部重绘</button>
+        </div>
+      </footer>
+    </main>
+    <script src="manual-window.js"></script>
+  </body>
+</html>

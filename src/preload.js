@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('watermarkLab', {
   validatePaths: (paths) => ipcRenderer.invoke('files:validate', paths),
   getImagePreview: (targetPath) => ipcRenderer.invoke('image:preview', targetPath),
   openPreviewWindow: (targetPath) => ipcRenderer.invoke('image:open-preview', targetPath),
+  openManualWindow: (payload) => ipcRenderer.invoke('manual:open', payload),
   pathForFile: (file) => webUtils.getPathForFile(file),
   chooseOutput: (current) => ipcRenderer.invoke('output:select', current),
   startBatch: (payload) => ipcRenderer.invoke('batch:start', payload),
@@ -29,5 +30,10 @@ contextBridge.exposeInMainWorld('watermarkLab', {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('batch:event', listener);
     return () => ipcRenderer.removeListener('batch:event', listener);
+  },
+  onManualSubmitted: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('manual:submitted', listener);
+    return () => ipcRenderer.removeListener('manual:submitted', listener);
   }
 });

@@ -79,7 +79,7 @@
             </label>
             <label class="interval-control" title="豆包回复结束后，继续等待图片出现的秒数；超过后判定为未生成。图片出得慢、被误判“没有生成图片”时可调大">
               <span>无图等待</span>
-              <input id="imageWaitSeconds" type="number" min="5" max="300" step="1" value="30">
+              <input id="imageWaitSeconds" type="number" min="5" max="300" step="1" value="60">
               <span>秒</span>
             </label>
           </div>
@@ -115,7 +115,7 @@
                 <span>关闭后在后台处理；安全验证时仍会临时显示</span>
               </div>
               <label class="switch">
-                <input id="showBrowserWindow" type="checkbox" checked>
+                <input id="showBrowserWindow" type="checkbox">
                 <span></span>
               </label>
             </div>
@@ -263,40 +263,6 @@
           <img id="previewImage" class="is-hidden" alt="处理结果预览" draggable="false">
           <div class="preview-help">⌘ + / − 缩放 · ⌘ 0 还原 · 放大后拖拽查看</div>
         </div>
-      </section>
-    </div>
-
-    <div id="manualEditorModal" class="manual-editor-modal is-hidden" aria-hidden="true">
-      <div id="manualEditorBackdrop" class="preview-backdrop"></div>
-      <section class="manual-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="manualEditorTitle">
-        <header class="manual-editor-head">
-          <div>
-            <strong id="manualEditorTitle">手动涂抹局部重绘区域</strong>
-            <span id="manualEditorMeta">在原图上标记需要豆包重新处理的位置</span>
-          </div>
-          <button id="manualEditorClose" class="preview-close" type="button" aria-label="关闭手动涂抹">×</button>
-        </header>
-        <div id="manualEditorStage" class="manual-editor-stage">
-          <span id="manualEditorLoading" class="preview-loading">正在载入原图…</span>
-          <canvas id="manualEditorCanvas" class="is-hidden" aria-label="原图涂抹画布"></canvas>
-          <div id="manualBrushCursor" class="manual-brush-cursor is-hidden" aria-hidden="true"></div>
-          <div class="manual-editor-tip">用亮粉色画笔覆盖需要重新处理的区域</div>
-        </div>
-        <footer class="manual-editor-toolbar">
-          <div class="brush-control">
-            <span class="brush-dot" aria-hidden="true"></span>
-            <label for="manualBrushSize">画笔大小</label>
-            <input id="manualBrushSize" type="range" min="0.8" max="10" step="0.2" value="3">
-            <output id="manualBrushSizeValue">3%</output>
-          </div>
-          <div class="manual-editor-note">只会将涂抹区域作为局部修复指示发送给豆包</div>
-          <div class="manual-editor-actions">
-            <button id="manualUndo" class="button ghost" type="button" disabled>撤销</button>
-            <button id="manualClear" class="button ghost" type="button" disabled>清空</button>
-            <button id="manualEditorCancel" class="button ghost" type="button">取消</button>
-            <button id="manualEditorSend" class="button primary compact-primary" type="button" disabled>发送局部重绘</button>
-          </div>
-        </footer>
       </section>
     </div>
 
