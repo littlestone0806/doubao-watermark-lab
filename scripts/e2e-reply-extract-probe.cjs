@@ -13,7 +13,9 @@ const { noImageGeneratedError } = require('../src/doubao-automation');
 const CWD = path.resolve(__dirname, '..');
 const PORT = 9339;
 const ELECTRON = path.join(CWD, 'node_modules', '.bin', 'electron');
-const CONVERSATION_URL = 'https://www.doubao.com/chat/38435185299563522';
+// 通过环境变量传入一个存在的豆包会话 URL（含消息记录），避免把私人会话 ID 写进仓库
+// 示例：DOUBAO_TEST_CONVERSATION='https://www.doubao.com/chat/你的会话ID' node scripts/e2e-reply-extract-probe.cjs
+const CONVERSATION_URL = process.env.DOUBAO_TEST_CONVERSATION || '';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (message) => console.log(`[probe ${new Date().toISOString().slice(11, 19)}] ${message}`);
@@ -123,14 +125,20 @@ async function main() {
     if (!doubaoTarget) throw new Error('豆包窗口未出现');
     doubao = new CDP(doubaoTarget.webSocketDebuggerUrl);
 
-    log(`导航到“你好”会话: ${CONVERSATION_URL}`);
+    if (!CONVERSATION_URL) {
+      report.aborted = true;
+      report.notes.push('请通过环境变量 DOUBAO_TEST_CONVERSATION 传入一个存在的豆包会话 URL');
+      return report;
+    }
+    const expectedId = (CONVERSATION_URL.match(/\/chat\/([0-9a-zA-Z]{8,})/) || [])[1] || '';
+    log(`导航到测试会话: ${CONVERSATION_URL}`);
     await doubao.evaluate(`(() => { location.href = ${JSON.stringify(CONVERSATION_URL)}; return true; })()`);
     await sleep(6000);
     const landed = await doubao.evaluate('location.href').catch(() => '');
     log(`落地 URL: ${landed}`);
-    if (!landed.includes('38435185299563522')) {
+    if (!expectedId || !landed.includes(expectedId)) {
       report.aborted = true;
-      report.notes.push('“你好”会话已被删除，无法复用；请重跑一次消息版探测');
+      report.notes.push('测试会话不存在或已被删除，请换一个新的会话 URL');
       return report;
     }
 
@@ -143,15 +151,15 @@ async function main() {
     log(`页面对照(尾部 220 字): ${result.bodyTail}`);
     report.extracted = result.assistantTailText;
 
-    report.assertions['提取到豆包回复内容'] = result.assistantTailText.includes('你好呀');
-    report.assertions['不包含联想问题'] = !result.assistantTailText.includes('如何被训练') && !result.assistantTailText.includes('什么功能');
+    report.assertions['提取到豆包回复内容'] = result.assistantTailText.length > 0;
+    report.assertions['不包含联想问题'] = !/suggest|如何被训练|什么功能/.test(result.assistantTailText);
     report.assertions['不包含页面杂项'] = !result.assistantTailText.includes('快速') && !result.assistantTailText.includes('重新生成');
-    report.assertions['提取结果只有豆包这一条回复'] = result.assistantTailText.length > 0 && result.assistantTailText.length < 60;
+    report.assertions['提取结果只含一条回复（长度合理）'] = result.assistantTailText.length > 0 && result.assistantTailText.length < 2000;
 
-    const finalMessage = noImageGeneratedError(result.assistantTailText, '你好').message;
+    const finalMessage = noImageGeneratedError(result.assistantTailText, '').message;
     log(`最终报错文案: ${finalMessage}`);
     report.finalErrorMessage = finalMessage;
-    report.assertions['报错文案不含用户发送内容'] = !finalMessage.includes('；“你好”') && !finalMessage.includes(' 你好 ');
+    report.assertions['报错文案包含豆包回复摘要'] = finalMessage.includes('豆包回复：“');
   } finally {
     doubao?.close();
     renderer?.close();
