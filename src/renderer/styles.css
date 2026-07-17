@@ -333,8 +333,11 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .result-action-button { height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-strong); color: var(--muted); box-shadow: inset 0 1px 0 var(--glass-highlight); cursor: pointer; font-size: 9px; font-weight: 750; white-space: nowrap; transition: .18s ease; }
 .result-action-button svg { width: 13px; height: 13px; }
 .result-action-button.preview-result { border-color: rgba(var(--accent-rgb), .3); background: var(--accent-soft); color: var(--accent); }
+.result-action-button.regenerate-result { width: 29px; padding: 0; flex: none; }
+.result-action-button.regenerate-result svg { width: 14px; height: 14px; }
 .result-action-button:hover:not(:disabled) { border-color: rgba(var(--accent-rgb), .55); color: var(--accent); transform: translateY(-1px); }
 .result-action-button:disabled { opacity: .42; cursor: default; }
+.result-action-button.regenerate-result.is-pending:disabled { opacity: 1; border-color: rgba(var(--accent-rgb), .55); color: var(--accent); }
 .remove-button { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--faint); cursor: pointer; font-size: 17px; }
 .remove-button:hover { background: var(--danger-soft); color: var(--danger); }
 .remove-button:disabled { opacity: .25; cursor: default; }

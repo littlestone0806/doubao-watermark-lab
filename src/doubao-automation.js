@@ -10,6 +10,9 @@ const UPLOAD_MARKER = 'data-watermark-lab-upload';
 // 豆包回复结束后，等待图片出现的默认宽限时间（可在界面“无图等待”中调整）
 const DEFAULT_NO_IMAGE_GRACE_MS = 30_000;
 const VERIFICATION_PATTERN = /请选择所有符合(?:上|下)文描述|拖拽到下方|安全验证|完成验证|人机验证|验证码|滑动验证|请先验证|verify you are human/i;
+// 验证通过后的成功文案：出现即视为验证已结束（成功页/成功浮层里常带 verify 类容器，
+// 且“已完成验证”本身就含有“完成验证”字样，不做排除会把成功状态误判为仍在验证中，任务永远卡住）
+const VERIFICATION_SUCCESS_PATTERN = /验证(?:成功|通过|已完成)|已(?:完成|通过)验证|congratulations|verification (?:successful|succeeded|passed|complete)/i;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -77,6 +80,7 @@ function pageVerificationState(patternSource) {
     const style = getComputedStyle(element);
     return rect.width > 30 && rect.height > 20 && style.visibility !== 'hidden' && style.display !== 'none';
   };
+  const successPattern = /验证(?:成功|通过|已完成)|已(?:完成|通过)验证|congratulations|verification (?:successful|succeeded|passed|complete)/i;
   const pattern = new RegExp(patternSource, 'i');
   const candidates = [...document.querySelectorAll(
     '[role="dialog"], [aria-modal="true"], iframe, [class*="captcha" i], [class*="verify" i], [id*="captcha" i], [id*="verify" i]'
@@ -92,8 +96,25 @@ function pageVerificationState(patternSource) {
     && /captcha|verify|challenge|secsdk|geetest/i.test(`${element.src || ''} ${element.name || ''} ${element.title || ''}`));
   const hasChallengeContainer = candidates.some((element) => element.tagName !== 'IFRAME'
     && /captcha|verify|challenge|secsdk|geetest/i.test(`${element.id || ''} ${element.className || ''}`));
+  // 成功文案具有否决权：验证成功页/成功浮层里仍会残留 verify 类容器和“完成验证”字样
+  const successZones = `${document.title || ''}\n${text}\n${bodyText.slice(0, 1500)}`;
+  if (successPattern.test(successZones)) {
+    return { detected: false, summary: text.replace(/\s+/g, ' ').slice(0, 160) };
+  }
+  // 匹配指令文案前先剔除成功字样，避免“已完成验证”误中“完成验证”
+  const instructionText = text.replace(successPattern, '');
+  const patternHit = pattern.test(instructionText);
+  // 没有挑战 iframe、没有任何指令文案，且聊天输入框已可用：
+  // 说明挑战浮层已消失，残留的 verify 类空容器不算仍在验证
+  if (!hasChallengeFrame && !hasSpecificChallengeCopy && !patternHit) {
+    const hasComposer = [...document.querySelectorAll('textarea, [contenteditable="true"]')]
+      .some((element) => visible(element) && !element.disabled);
+    if (hasComposer) {
+      return { detected: false, summary: text.replace(/\s+/g, ' ').slice(0, 160) };
+    }
+  }
   return {
-    detected: hasChallengeFrame || hasChallengeContainer || hasSpecificChallengeCopy || pattern.test(text),
+    detected: hasChallengeFrame || hasChallengeContainer || hasSpecificChallengeCopy || patternHit,
     summary: text.replace(/\s+/g, ' ').slice(0, 160)
   };
 }

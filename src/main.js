@@ -60,8 +60,19 @@ let previewWindow;
 let manualWindow;
 let loginTimer;
 let loginFlowActive = false;
-let running = false;
-let cancelRequested = false;
+// 批处理与涂抹重绘都支持并发：activeBatchCount 跟踪进行中的任务数，每个批次持有独立取消标记；
+// busyWindows 记录被批次占用的豆包窗口
+let activeBatchCount = 0;
+let batchSeq = 0;
+const activeCancelRefs = new Set();
+const busyWindows = new Set();
+let tempFileSeq = 0;
+
+// 并发批次可能同时写同一文件，临时文件名必须唯一，避免 rename 竞态
+function uniqueTemporaryPath(targetPath) {
+  tempFileSeq += 1;
+  return `${targetPath}.${process.pid}.${Date.now()}.${tempFileSeq}.tmp`;
+}
 
 function settingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -121,7 +132,7 @@ function sanitizeSettings(input = {}) {
 async function saveSettings(settings) {
   const sanitized = sanitizeSettings(settings);
   await fs.mkdir(path.dirname(settingsPath()), { recursive: true });
-  const temporary = `${settingsPath()}.tmp`;
+  const temporary = uniqueTemporaryPath(settingsPath());
   await fs.writeFile(temporary, JSON.stringify(sanitized, null, 2), 'utf8');
   await fs.rename(temporary, settingsPath());
   return sanitized;
@@ -169,7 +180,7 @@ async function saveQueueRecords(records) {
     .map(sanitizeQueueRecord)
     .filter(Boolean);
   await fs.mkdir(path.dirname(queueRecordsPath()), { recursive: true });
-  const temporary = `${queueRecordsPath()}.tmp`;
+  const temporary = uniqueTemporaryPath(queueRecordsPath());
   await fs.writeFile(temporary, JSON.stringify(sanitized, null, 2), 'utf8');
   await fs.rename(temporary, queueRecordsPath());
   return true;
@@ -329,7 +340,7 @@ async function openDoubaoLogin() {
 }
 
 async function logoutDoubao() {
-  if (running) throw new Error('批处理运行期间不能退出登录');
+  if (activeBatchCount > 0) throw new Error('批处理运行期间不能退出登录');
   clearInterval(loginTimer);
   loginTimer = null;
   loginFlowActive = false;
@@ -352,15 +363,6 @@ async function logoutDoubao() {
     persistent: true
   });
   return true;
-}
-
-function hideDoubaoWindows() {
-  const persistentSession = session.fromPartition(DOUBAO_PARTITION);
-  for (const window of BrowserWindow.getAllWindows()) {
-    if (window !== mainWindow && !window.isDestroyed() && window.webContents.session === persistentSession) {
-      window.hide();
-    }
-  }
 }
 
 function createDoubaoWindow({ focus = true } = {}) {
@@ -472,26 +474,45 @@ function createAuxWorkerWindow(position) {
   return workerWindow;
 }
 
-async function ensureBatchWindows(count, { show }) {
-  const windows = [createDoubaoWindow({ focus: show })];
-  while (auxWorkerWindows.length < count - 1) {
-    auxWorkerWindows.push(createAuxWorkerWindow(auxWorkerWindows.length));
+function hideIdleDoubaoWindows() {
+  const persistentSession = session.fromPartition(DOUBAO_PARTITION);
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window !== mainWindow && !window.isDestroyed() && window.webContents.session === persistentSession && !busyWindows.has(window)) {
+      window.hide();
+    }
   }
-  for (const extra of auxWorkerWindows.splice(Math.max(0, count - 1))) {
-    extra.destroy();
+}
+
+// 为批次分配互不冲突的豆包窗口：优先复用空闲窗口，不够时新建；批次结束后释放
+async function acquireBatchWindows(count, { show }) {
+  createDoubaoWindow({ focus: false });
+  const idleWindows = () => [doubaoWindow, ...auxWorkerWindows]
+    .filter((window) => window && !window.isDestroyed() && !busyWindows.has(window));
+  const windows = [];
+  for (let index = 0; index < count; index += 1) {
+    let window = idleWindows().find((item) => !windows.includes(item));
+    if (!window) {
+      window = createAuxWorkerWindow(auxWorkerWindows.length);
+      auxWorkerWindows.push(window);
+    }
+    busyWindows.add(window);
+    windows.push(window);
   }
-  windows.push(...auxWorkerWindows);
   if (show) {
     windows.forEach((window, index) => {
-      if (index === 0) return;
       window.setPosition(90 + index * 56, 70 + index * 48);
       window.show();
     });
-    windows[0].focus();
+    if (activeBatchCount <= 1) windows[0].focus();
   } else {
-    hideDoubaoWindows();
+    hideIdleDoubaoWindows();
   }
-  await Promise.all(windows.map(waitForDoubaoLoad));
+  try {
+    await Promise.all(windows.map(waitForDoubaoLoad));
+  } catch (error) {
+    windows.forEach((window) => busyWindows.delete(window));
+    throw error;
+  }
   return windows;
 }
 
@@ -527,7 +548,25 @@ function batchEvent(payload) {
 }
 
 async function runBatch(items, rawSettings, runtime = {}) {
-  if (running) throw new Error('已有批处理任务正在运行');
+  const mode = runtime.mode === 'manual' ? 'manual' : 'batch';
+  // 批处理与涂抹重绘都允许并发，合计最多同时 3 个（与多线程工作数一致，控制风控）
+  if (activeBatchCount >= PARALLEL_WORKER_COUNT) {
+    throw new Error(`最多同时处理 ${PARALLEL_WORKER_COUNT} 张图片，请等待其中一张完成`);
+  }
+  // 守卫通过后同步占位：快速连续点击也不会突破并发上限
+  const batchId = `batch-${Date.now()}-${batchSeq += 1}`;
+  const cancelRef = { value: false };
+  activeCancelRefs.add(cancelRef);
+  activeBatchCount += 1;
+  try {
+    return await runBatchReserved(items, rawSettings, runtime, { mode, batchId, cancelRef });
+  } finally {
+    activeCancelRefs.delete(cancelRef);
+    activeBatchCount -= 1;
+  }
+}
+
+async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, cancelRef }) {
   // 渲染进程会把每个任务的历史会话一起带过来（{ path, conversationId }），校验后合并回文件对象
   const requestedConversations = new Map();
   const requestedPaths = (Array.isArray(items) ? items : []).map((item) => {
@@ -549,26 +588,30 @@ async function runBatch(items, rawSettings, runtime = {}) {
   const settings = runtime.persistSettings === false
     ? sanitizeSettings(rawSettings)
     : await saveSettings(rawSettings);
-  const mode = runtime.mode === 'manual' ? 'manual' : 'batch';
   const useParallel = mode !== 'manual' && settings.parallelProcessing && files.length > 1;
-  const windows = await ensureBatchWindows(useParallel ? Math.min(PARALLEL_WORKER_COUNT, files.length) : 1, {
+  const windows = await acquireBatchWindows(useParallel ? Math.min(PARALLEL_WORKER_COUNT, files.length) : 1, {
     show: settings.showBrowserWindow
   });
   const browser = windows[0];
+  const releaseWindows = () => windows.forEach((window) => busyWindows.delete(window));
 
-  const login = await getLoginStatus();
-  if (!login.loggedIn) {
-    loginFlowActive = true;
-    browser.show();
-    const automation = new DoubaoAutomation(browser);
-    await automation.openLoginDialog().catch(() => {});
-    throw new Error('请先在豆包窗口完成登录；登录状态会自动保存');
+  try {
+    const login = await getLoginStatus();
+    if (!login.loggedIn) {
+      loginFlowActive = true;
+      browser.show();
+      const automation = new DoubaoAutomation(browser);
+      await automation.openLoginDialog().catch(() => {});
+      throw new Error('请先在豆包窗口完成登录；登录状态会自动保存');
+    }
+  } catch (error) {
+    releaseWindows();
+    throw error;
   }
 
-  running = true;
-  cancelRequested = false;
   batchEvent({
     type: 'batch-start',
+    batchId,
     total: files.length,
     mode,
     path: runtime.eventPath || null,
@@ -585,6 +628,7 @@ async function runBatch(items, rawSettings, runtime = {}) {
     const sourcePath = files.length === 1 && runtime.sourcePath ? runtime.sourcePath : file.path;
     const jobBase = {
       index,
+      batchId,
       path: eventPath,
       name: path.basename(sourcePath),
       total: files.length,
@@ -593,7 +637,7 @@ async function runBatch(items, rawSettings, runtime = {}) {
     batchEvent({ type: 'job-start', ...jobBase });
 
     const automation = new DoubaoAutomation(workerWindow, {
-      isCancelled: () => cancelRequested,
+      isCancelled: () => cancelRef.value,
       onProgress: (message) => batchEvent({ type: 'job-progress', ...jobBase, message }),
       onVerificationRequired: () => {
         const persistentSession = session.fromPartition(DOUBAO_PARTITION);
@@ -611,7 +655,10 @@ async function runBatch(items, rawSettings, runtime = {}) {
         batchEvent({ type: 'verification-required', ...jobBase });
       },
       onVerificationCleared: () => {
-        if (!settings.showBrowserWindow) hideDoubaoWindows();
+        if (!settings.showBrowserWindow) {
+          if (workerWindow && !workerWindow.isDestroyed()) workerWindow.hide();
+          hideIdleDoubaoWindows();
+        }
         batchEvent({ type: 'verification-cleared', ...jobBase });
       }
     });
@@ -702,7 +749,7 @@ async function runBatch(items, rawSettings, runtime = {}) {
       results.push(result);
       batchEvent({ type: 'job-complete', ...result });
     } catch (error) {
-      if (error.code === 'CANCELLED' || cancelRequested) return;
+      if (error.code === 'CANCELLED' || cancelRef.value) return;
       const result = {
         ...jobBase,
         error: error.message || String(error),
@@ -721,9 +768,9 @@ async function runBatch(items, rawSettings, runtime = {}) {
   try {
     if (!useParallel) {
       for (let index = 0; index < files.length; index += 1) {
-        if (cancelRequested) break;
+        if (cancelRef.value) break;
         await processAt(index, browser);
-        if (index < files.length - 1 && !cancelRequested && settings.intervalSeconds > 0) {
+        if (index < files.length - 1 && !cancelRef.value && settings.intervalSeconds > 0) {
           batchEvent({ type: 'batch-wait', seconds: settings.intervalSeconds, nextIndex: index + 1 });
           await new Promise((resolve) => setTimeout(resolve, settings.intervalSeconds * 1000));
         }
@@ -733,7 +780,7 @@ async function runBatch(items, rawSettings, runtime = {}) {
       let nextIndex = 0;
       let lastStartAt = 0;
       const worker = async (workerWindow) => {
-        while (!cancelRequested) {
+        while (!cancelRef.value) {
           const index = nextIndex;
           nextIndex += 1;
           if (index >= files.length) return;
@@ -741,7 +788,7 @@ async function runBatch(items, rawSettings, runtime = {}) {
             const waitMs = PARALLEL_STAGGER_MS - (Date.now() - lastStartAt);
             if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
           }
-          if (cancelRequested) return;
+          if (cancelRef.value) return;
           lastStartAt = Date.now();
           await processAt(index, workerWindow);
         }
@@ -749,11 +796,11 @@ async function runBatch(items, rawSettings, runtime = {}) {
       await Promise.all(windows.map((workerWindow) => worker(workerWindow)));
     }
   } finally {
-    running = false;
-    const cancelled = cancelRequested;
-    cancelRequested = false;
+    releaseWindows();
+    const cancelled = cancelRef.value;
     batchEvent({
       type: 'batch-complete',
+      batchId,
       cancelled,
       total: files.length,
       completed: results.filter((item) => item.outputPath && !item.error).length,
@@ -767,7 +814,6 @@ async function runBatch(items, rawSettings, runtime = {}) {
 }
 
 async function runManualEdit(payload = {}) {
-  if (running) throw new Error('已有处理任务正在运行');
   const sourcePath = typeof payload.sourcePath === 'string' ? path.resolve(payload.sourcePath) : '';
   const [source] = await validateImagePaths([sourcePath]);
   if (!source) throw new Error('原图不存在或格式不受支持');
@@ -967,8 +1013,8 @@ function registerIpc() {
   ipcMain.handle('batch:start', (_event, payload) => runBatch(payload?.paths, payload?.settings));
   ipcMain.handle('manual:start', (_event, payload) => runManualEdit(payload));
   ipcMain.handle('batch:cancel', () => {
-    if (running) cancelRequested = true;
-    return running;
+    activeCancelRefs.forEach((ref) => { ref.value = true; });
+    return activeCancelRefs.size > 0;
   });
   ipcMain.handle('path:open', async (_event, targetPath) => {
     if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) return '无效路径';
@@ -994,5 +1040,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   clearInterval(loginTimer);
-  cancelRequested = true;
+  activeCancelRefs.forEach((ref) => { ref.value = true; });
 });

@@ -6,6 +6,7 @@ const state = {
   running: false,
   loggedIn: false,
   settings: null,
+  activeBatches: new Set(),
   queueReady: false
 };
 
@@ -299,7 +300,6 @@ async function openPreview(file) {
 }
 
 async function openManualEditor(file) {
-  if (state.running) return;
   try {
     await api.openManualWindow({ path: file.path, name: file.name });
   } catch (error) {
@@ -307,12 +307,40 @@ async function openManualEditor(file) {
   }
 }
 
+async function startBatchForFiles(files) {
+  const settings = readSettings();
+  state.settings = await api.saveSettings(settings);
+  try {
+    await api.startBatch({
+      paths: files.map((file) => ({ path: file.path, conversationId: file.conversationId || '' })),
+      settings: state.settings
+    });
+  } catch (error) {
+    files.forEach((file) => { file.regenRequested = false; });
+    if (state.activeBatches.size) renderQueue();
+    else setRunning(false);
+    toast(error.message || String(error), 'error');
+  }
+}
+
+// 单张重新生成：效果等同于只勾选这一张再点“开始批量处理”。
+// 其他任务正在运行时点击会立即并发执行（最多 3 个任务同时处理）。
+async function regenerateFile(file) {
+  if (file.missing || file.regenRequested || file.status === 'active') return;
+  if (state.activeBatches.size >= 3) {
+    toast('最多同时处理 3 张图片，请等待其中一张完成', 'error');
+    return;
+  }
+  updateFile(file.path, { regenRequested: true });
+  await startBatchForFiles([file]);
+}
+
 async function handleManualSubmitted(payload = {}) {
   const sourcePath = typeof payload.sourcePath === 'string' ? payload.sourcePath : '';
   const strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
   if (!sourcePath || !strokes.length) return;
-  if (state.running) {
-    toast('已有处理任务正在运行，请等待完成后再发送涂抹', 'error');
+  if (state.activeBatches.size >= 3) {
+    toast('最多同时处理 3 张图片，请等待其中一张完成', 'error');
     return;
   }
   const file = state.files.find((item) => item.path === sourcePath);
@@ -327,7 +355,8 @@ async function handleManualSubmitted(payload = {}) {
       settings: readSettings()
     });
   } catch (error) {
-    setRunning(false);
+    if (state.activeBatches.size) renderQueue();
+    else setRunning(false);
     if (file) updateFile(file.path, { status: file.outputPath ? 'complete' : 'error', message: '' });
     toast(error.message || String(error), 'error');
   }
@@ -411,6 +440,19 @@ function makeQueueItem(file, index) {
   status.className = 'job-status';
   if (file.status === 'complete' && file.outputPath) {
     status.classList.add('result-actions');
+    const regenerateButton = document.createElement('button');
+    regenerateButton.className = 'result-action-button regenerate-result';
+    regenerateButton.type = 'button';
+    regenerateButton.disabled = Boolean(file.missing) || Boolean(file.regenRequested);
+    regenerateButton.classList.toggle('is-pending', Boolean(file.regenRequested));
+    regenerateButton.title = file.missing
+      ? '原图已移动或删除，无法重新生成'
+      : file.regenRequested
+        ? '正在发起重新生成…'
+        : '重新生成（接回该图片的历史对话）';
+    regenerateButton.setAttribute('aria-label', '重新生成');
+    regenerateButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
+    regenerateButton.addEventListener('click', () => regenerateFile(file));
     const previewButton = document.createElement('button');
     previewButton.className = 'result-action-button preview-result';
     previewButton.type = 'button';
@@ -420,10 +462,10 @@ function makeQueueItem(file, index) {
     manualButton.className = 'result-action-button manual-result';
     manualButton.type = 'button';
     manualButton.textContent = '涂抹重绘';
-    manualButton.disabled = state.running || file.missing;
+    manualButton.disabled = Boolean(file.missing);
     manualButton.title = file.missing ? '原图已移动或删除，无法手动涂抹' : '在原图上涂抹后重新发送';
     manualButton.addEventListener('click', () => openManualEditor(file));
-    status.append(previewButton, manualButton);
+    status.append(regenerateButton, previewButton, manualButton);
   } else {
     const statusTitle = document.createElement('strong');
     statusTitle.textContent = file.message || (file.selected === false && !file.status ? '本次跳过' : '等待处理');
@@ -507,11 +549,8 @@ function updateLogin(status) {
 
 function setRunning(value) {
   state.running = value;
-  document.querySelectorAll('.remove-button').forEach((button) => { button.disabled = value; });
-  document.querySelectorAll('.manual-result').forEach((button) => { button.disabled = value; });
-  document.querySelectorAll('.queue-check-input').forEach((input) => { input.disabled = value; });
   elements.logoutButton.disabled = value;
-  syncActionState();
+  renderQueue();
 }
 
 function updateFile(path, patch) {
@@ -523,11 +562,14 @@ function updateFile(path, patch) {
 
 function handleBatchEvent(event) {
   if (event.type === 'batch-start') {
-    setRunning(true);
+    const batchId = event.batchId || 'default';
+    const firstBatch = state.activeBatches.size === 0;
+    state.activeBatches.add(batchId);
+    if (firstBatch) setRunning(true);
     if (event.parallel) toast(`多线程模式已开启：${event.workers || 3} 张图片同时处理`);
     if (event.mode === 'manual' && event.path) {
       updateFile(event.path, { status: 'active', message: '准备局部重绘', progress: 5 });
-    } else {
+    } else if (firstBatch) {
       state.files.forEach((file) => {
         if (file.selected === false) return;
         Object.assign(file, { status: '', message: '', progress: 0 });
@@ -539,7 +581,8 @@ function handleBatchEvent(event) {
     updateFile(event.path, {
       status: 'active',
       message: event.mode === 'manual' ? '准备局部重绘' : '准备处理',
-      progress: 5
+      progress: 5,
+      regenRequested: false
     });
   }
   if (event.type === 'job-progress') {
@@ -563,6 +606,7 @@ function handleBatchEvent(event) {
         status: 'complete',
         message: '',
         selected: false,
+        regenRequested: false,
         ...(event.conversationId ? { conversationId: event.conversationId } : {}),
         outputPath: event.outputPath,
         cropped: event.cropped,
@@ -582,13 +626,16 @@ function handleBatchEvent(event) {
     updateFile(event.path, {
       status: event.mode === 'manual' && source?.outputPath ? 'complete' : 'error',
       message: event.mode === 'manual' && source?.outputPath ? '' : event.error,
+      regenRequested: false,
       ...(event.conversationId ? { conversationId: event.conversationId } : {})
     });
     toast(`${event.name}：${event.error}`, 'error');
   }
   if (event.type === 'batch-complete') {
-    setRunning(false);
-    if (event.cancelled) {
+    state.activeBatches.delete(event.batchId || 'default');
+    const idle = state.activeBatches.size === 0;
+    if (idle) setRunning(false);
+    if (event.cancelled && idle) {
       state.files.forEach((file) => {
         if (file.status !== 'active') return;
         Object.assign(file, file.outputPath
