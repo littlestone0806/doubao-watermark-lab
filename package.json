@@ -21,6 +21,11 @@
     "appId": "com.watermarklab.doubao",
     "productName": "水印清理工作台",
     "asar": true,
+    "publish": {
+      "provider": "github",
+      "owner": "littlestone0806",
+      "repo": "doubao-watermark-lab"
+    },
     "files": [
       "src/**/*",
       "package.json"
@@ -54,5 +59,8 @@
       "category": "Graphics"
     },
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

@@ -957,8 +957,13 @@ async function getImagePreviewData(targetPath, maxSize) {
   };
 }
 
-async function openImagePreviewWindow(targetPath) {
+async function openImagePreviewWindow(payload) {
+  // 兼容旧的纯路径入参；新入参 { targetPath, sourcePath } 会附带原图用于前后对比
+  const targetPath = typeof payload === 'string' ? payload : payload?.targetPath;
+  const sourcePath = typeof payload === 'object' && payload ? payload.sourcePath : '';
   const preview = await getImagePreviewData(targetPath);
+  // 原图可能已被移动或删除，加载失败时不影响结果预览
+  preview.source = await getImagePreviewData(sourcePath).catch(() => null);
   if (previewWindow && !previewWindow.isDestroyed()) {
     previewWindow.setTitle(`预览 · ${preview.name}`);
     previewWindow.webContents.send('preview:load', preview);
@@ -1191,6 +1196,43 @@ function registerEditShortcuts() {
   });
 }
 
+// 自动更新：启动后静默检查 GitHub Releases，有新版时后台下载，下载完成后询问是否重启安装。
+// 未签名的 macOS 包无法自动安装更新（Squirrel 限制），检查/下载会静默失败，用户仍走发布页手动下载。
+function setupAutoUpdater() {
+  if (!app.isPackaged) return;
+  let autoUpdater;
+  try {
+    ({ autoUpdater } = require('electron-updater'));
+  } catch {
+    return;
+  }
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (info) => {
+    sendToRenderer('app:event', { type: 'update-available', version: info?.version || '' });
+  });
+  autoUpdater.on('update-downloaded', async (info) => {
+    const version = info?.version ? ` ${info.version}` : '';
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '更新已就绪',
+      message: `新版本${version}已下载完成`,
+      detail: '重启应用后即可使用新版本；选择“稍后”则下次退出时自动安装。',
+      buttons: ['立即重启', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (choice.response === 0) autoUpdater.quitAndInstall();
+  });
+  autoUpdater.on('error', (error) => {
+    console.warn(`自动更新检查失败：${error?.message || error}`);
+  });
+  const check = () => autoUpdater.checkForUpdates().catch(() => {});
+  setTimeout(check, 6_000);
+  setInterval(check, 4 * 60 * 60 * 1000);
+}
+
 app.whenReady().then(async () => {
   // 应用不使用系统菜单栏（macOS 顶部菜单与 Windows 窗口菜单一并移除）
   Menu.setApplicationMenu(null);
@@ -1200,6 +1242,7 @@ app.whenReady().then(async () => {
   configureDoubaoSession();
   registerIpc();
   createMainWindow();
+  setupAutoUpdater();
   await broadcastLoginStatus();
   app.on('activate', () => {
     // 退出过程中不再重建窗口，避免关闭后 Dock 点击又拉起主窗口

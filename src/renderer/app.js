@@ -239,7 +239,7 @@ function closePreview() {
 async function openPreview(file) {
   if (!file.outputPath) return;
   try {
-    await api.openPreviewWindow(file.outputPath);
+    await api.openPreviewWindow({ targetPath: file.outputPath, sourcePath: file.path });
   } catch (error) {
     toast(error.message || String(error), 'error');
   }
@@ -867,6 +867,11 @@ elements.startButton.addEventListener('click', async () => {
 api.onLoginStatus(updateLogin);
 api.onBatchEvent(handleBatchEvent);
 api.onManualSubmitted(handleManualSubmitted);
+api.onAppEvent((event) => {
+  if (event?.type === 'update-available') {
+    toast(`发现新版本 ${event.version}，正在后台下载，完成后会提示重启`);
+  }
+});
 
 async function initialize() {
   applySettings(await api.getSettings());

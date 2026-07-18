@@ -41,5 +41,10 @@ contextBridge.exposeInMainWorld('watermarkLab', {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('manual:submitted', listener);
     return () => ipcRenderer.removeListener('manual:submitted', listener);
+  },
+  onAppEvent: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('app:event', listener);
+    return () => ipcRenderer.removeListener('app:event', listener);
   }
 });

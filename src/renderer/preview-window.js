@@ -5,7 +5,11 @@ const elements = {
   title: document.querySelector('#previewTitle'),
   meta: document.querySelector('#previewMeta'),
   stage: document.querySelector('#previewStage'),
+  stack: document.querySelector('#compareStack'),
   image: document.querySelector('#previewImage'),
+  sourceImage: document.querySelector('#sourceImage'),
+  divider: document.querySelector('#compareDivider'),
+  compareToggle: document.querySelector('#compareToggle'),
   loading: document.querySelector('#previewLoading'),
   zoomOut: document.querySelector('#zoomOut'),
   zoomReset: document.querySelector('#zoomReset'),
@@ -17,6 +21,11 @@ let zoom = 1;
 let panX = 0;
 let panY = 0;
 let pointer = null;
+// 对比模式状态：split 为分割线位置（占显示宽度的百分比）
+let comparing = false;
+let split = 50;
+let splitPointer = null;
+let sourceAvailable = false;
 
 function clampPan() {
   const imageWidth = elements.image.clientWidth * zoom;
@@ -29,8 +38,8 @@ function clampPan() {
 
 function applyTransform() {
   clampPan();
-  elements.image.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
-  elements.image.classList.toggle('is-zoomed', zoom > 1);
+  elements.stack.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
+  elements.stack.classList.toggle('is-zoomed', zoom > 1);
   elements.zoomValue.textContent = zoom === 1 ? '适合' : `${Math.round(zoom * 100)}%`;
   elements.zoomOut.disabled = zoom <= ZOOM_LEVELS[0];
   elements.zoomIn.disabled = zoom >= ZOOM_LEVELS.at(-1);
@@ -83,20 +92,69 @@ function fitImageToStage() {
   elements.image.style.width = `${Math.max(1, Math.round(naturalWidth * fit))}px`;
 }
 
+function applySplit() {
+  split = Math.min(98, Math.max(2, split));
+  elements.stack.style.setProperty('--split', `${split}%`);
+}
+
+function setCompare(enabled) {
+  if (enabled && !sourceAvailable) return;
+  comparing = enabled;
+  elements.compareToggle.classList.toggle('is-active', comparing);
+  elements.sourceImage.classList.toggle('is-hidden', !comparing);
+  elements.divider.classList.toggle('is-hidden', !comparing);
+  for (const badge of elements.stack.querySelectorAll('.compare-badge')) {
+    badge.classList.toggle('is-hidden', !comparing);
+  }
+}
+
 window.previewBridge.onLoad((preview) => {
   document.title = `预览 · ${preview.name}`;
   elements.title.textContent = preview.name;
   elements.meta.textContent = `${preview.width} × ${preview.height}`;
   elements.loading.classList.remove('is-hidden');
-  elements.image.classList.add('is-hidden');
+  elements.stack.classList.add('is-hidden');
+  // 原图数据随结果一起下发（可能为空：原图被移动或删除时不可对比）
+  sourceAvailable = Boolean(preview.source?.dataUrl);
+  setCompare(false);
+  split = 50;
+  applySplit();
+  elements.compareToggle.classList.toggle('is-hidden', !sourceAvailable);
   elements.image.onload = () => {
     elements.loading.classList.add('is-hidden');
-    elements.image.classList.remove('is-hidden');
+    elements.stack.classList.remove('is-hidden');
     fitImageToStage();
     requestAnimationFrame(resetView);
   };
   elements.image.src = preview.dataUrl;
+  if (sourceAvailable) {
+    elements.sourceImage.src = preview.source.dataUrl;
+    elements.sourceImage.alt = `原图 · ${preview.source.width} × ${preview.source.height}`;
+  } else {
+    elements.sourceImage.removeAttribute('src');
+  }
 });
+
+elements.compareToggle.addEventListener('click', () => setCompare(!comparing));
+
+// 拖动分割线调整原图/结果占比
+elements.divider.addEventListener('pointerdown', (event) => {
+  event.stopPropagation();
+  splitPointer = event.pointerId;
+  elements.divider.setPointerCapture(event.pointerId);
+});
+elements.divider.addEventListener('pointermove', (event) => {
+  if (splitPointer !== event.pointerId) return;
+  const rect = elements.stack.getBoundingClientRect();
+  if (!rect.width) return;
+  split = ((event.clientX - rect.left) / rect.width) * 100;
+  applySplit();
+});
+const endSplitDrag = (event) => {
+  if (splitPointer === event.pointerId) splitPointer = null;
+};
+elements.divider.addEventListener('pointerup', endSplitDrag);
+elements.divider.addEventListener('pointercancel', endSplitDrag);
 
 elements.zoomOut.addEventListener('click', () => stepZoom(-1));
 elements.zoomIn.addEventListener('click', () => stepZoom(1));
@@ -112,13 +170,13 @@ elements.stage.addEventListener('wheel', (event) => {
     applyTransform();
   }
 }, { passive: false });
-elements.image.addEventListener('pointerdown', (event) => {
+elements.stack.addEventListener('pointerdown', (event) => {
   if (zoom <= 1) return;
   pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
-  elements.image.setPointerCapture(event.pointerId);
-  elements.image.classList.add('is-dragging');
+  elements.stack.setPointerCapture(event.pointerId);
+  elements.stack.classList.add('is-dragging');
 });
-elements.image.addEventListener('pointermove', (event) => {
+elements.stack.addEventListener('pointermove', (event) => {
   if (!pointer || pointer.id !== event.pointerId) return;
   panX += event.clientX - pointer.x;
   panY += event.clientY - pointer.y;
@@ -129,10 +187,10 @@ elements.image.addEventListener('pointermove', (event) => {
 function endDrag(event) {
   if (!pointer || pointer.id !== event.pointerId) return;
   pointer = null;
-  elements.image.classList.remove('is-dragging');
+  elements.stack.classList.remove('is-dragging');
 }
-elements.image.addEventListener('pointerup', endDrag);
-elements.image.addEventListener('pointercancel', endDrag);
+elements.stack.addEventListener('pointerup', endDrag);
+elements.stack.addEventListener('pointercancel', endDrag);
 window.addEventListener('resize', () => {
   fitImageToStage();
   applyTransform();
