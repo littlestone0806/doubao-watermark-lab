@@ -34,6 +34,7 @@ const STABLE_PROCESSING_SETTINGS = Object.freeze({
   newConversation: false
 });
 const PARALLEL_WORKER_COUNT = 3;
+const MAX_CONCURRENT_LIMIT = 8;
 const PARALLEL_STAGGER_MS = 5_000;
 const DEFAULT_SETTINGS = {
   outputDirectory: '',
@@ -120,6 +121,7 @@ function sanitizeSettings(input = {}) {
     intervalSeconds: Math.min(600, Math.max(0, Number.isFinite(Number(input.intervalSeconds)) ? Math.round(Number(input.intervalSeconds)) : 30)),
     imageWaitSeconds: Math.min(300, Math.max(5, Number.isFinite(Number(input.imageWaitSeconds)) ? Math.round(Number(input.imageWaitSeconds)) : 60)),
     parallelProcessing: input.parallelProcessing === true,
+    maxConcurrentTasks: Math.min(MAX_CONCURRENT_LIMIT, Math.max(1, Math.round(Number(input.maxConcurrentTasks) || PARALLEL_WORKER_COUNT))),
     showBrowserWindow: input.showBrowserWindow !== false,
     themeMode: THEME_MODES.has(input.themeMode) ? input.themeMode : 'auto',
     colorPalette,
@@ -231,10 +233,10 @@ async function loadQueueRecords() {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 1240,
-    height: 800,
-    minWidth: 980,
-    minHeight: 680,
+    width: 1140,
+    height: 736,
+    minWidth: 940,
+    minHeight: 630,
     backgroundColor: '#f5f4ef',
     icon: APP_ICON_PATH,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -549,9 +551,10 @@ function batchEvent(payload) {
 
 async function runBatch(items, rawSettings, runtime = {}) {
   const mode = runtime.mode === 'manual' ? 'manual' : 'batch';
-  // 批处理与涂抹重绘都允许并发，合计最多同时 3 个（与多线程工作数一致，控制风控）
-  if (activeBatchCount >= PARALLEL_WORKER_COUNT) {
-    throw new Error(`最多同时处理 ${PARALLEL_WORKER_COUNT} 张图片，请等待其中一张完成`);
+  // 批处理与涂抹重绘都允许并发，合计上限由「同时处理」设置决定（默认 3，控制风控）
+  const maxConcurrent = sanitizeSettings(rawSettings || {}).maxConcurrentTasks || PARALLEL_WORKER_COUNT;
+  if (activeBatchCount >= maxConcurrent) {
+    throw new Error(`最多同时处理 ${maxConcurrent} 张图片，请等待其中一张完成`);
   }
   // 守卫通过后同步占位：快速连续点击也不会突破并发上限
   const batchId = `batch-${Date.now()}-${batchSeq += 1}`;
@@ -589,7 +592,7 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     ? sanitizeSettings(rawSettings)
     : await saveSettings(rawSettings);
   const useParallel = mode !== 'manual' && settings.parallelProcessing && files.length > 1;
-  const windows = await acquireBatchWindows(useParallel ? Math.min(PARALLEL_WORKER_COUNT, files.length) : 1, {
+  const windows = await acquireBatchWindows(useParallel ? Math.min(settings.maxConcurrentTasks || PARALLEL_WORKER_COUNT, files.length) : 1, {
     show: settings.showBrowserWindow
   });
   const browser = windows[0];

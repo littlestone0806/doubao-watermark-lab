@@ -156,7 +156,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
   z-index: 1;
   height: 100vh;
   display: grid;
-  grid-template-rows: 88px minmax(0, 1fr) 86px;
+  grid-template-rows: 88px minmax(0, 1fr);
 }
 
 .topbar {
@@ -372,8 +372,8 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .switch input:checked + span { background: var(--accent); }
 .switch input:checked + span::after { transform: translateX(15px); }
 
-.appearance-card { padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); box-shadow: inset 0 1px 0 var(--glass-highlight); }
-.appearance-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.appearance-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-muted); box-shadow: inset 0 1px 0 var(--glass-highlight); }
+.appearance-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .appearance-title strong { display: block; margin-bottom: 4px; font-size: 11px; }
 .appearance-title span { display: block; color: var(--muted); font-size: 9px; }
 .appearance-title svg { width: 20px; height: 20px; color: var(--accent); }
@@ -406,10 +406,18 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .path-button em { flex: 0 0 auto; padding: 4px 7px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); font-size: 9px; font-style: normal; font-weight: 800; }
 .output-hint { margin-top: 7px; color: var(--faint); font-size: 9px; }
 
-.action-bar { display: flex; align-items: center; justify-content: space-between; padding: 13px 28px 17px; border-top: 1px solid var(--line-soft); background: var(--footer); backdrop-filter: blur(30px) saturate(150%); -webkit-backdrop-filter: blur(30px) saturate(150%); }
-.action-note { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
-.action-note svg { width: 15px; height: 15px; color: var(--amber); }
-.action-buttons { display: flex; gap: 9px; align-items: center; }
+.settings-actions { flex: none; display: flex; align-items: center; gap: 9px; padding: 13px 20px 16px; border-top: 1px solid var(--line-soft); }
+.settings-actions .button.ghost { flex: none; padding-inline: 11px; }
+.settings-actions .button.primary { min-width: 0; flex: 1; }
+.settings-actions .button.danger { flex: none; }
+.appearance-popover-anchor { position: relative; }
+.appearance-toggle { position: relative; }
+.appearance-toggle::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border: 1.5px solid var(--surface-strong); border-radius: 50%; background: var(--accent); }
+.appearance-toggle[aria-expanded="true"] { border-color: rgba(var(--accent-rgb), .52); background: var(--accent-soft); }
+.appearance-popover { position: absolute; z-index: 40; top: calc(100% + 9px); right: 0; min-width: 218px; padding: 12px 14px; border: 1px solid var(--glass-border); border-radius: 14px; background: var(--surface-strong); box-shadow: 0 18px 46px rgba(0,0,0,.18), inset 0 1px 0 var(--glass-highlight); backdrop-filter: blur(26px) saturate(150%); -webkit-backdrop-filter: blur(26px) saturate(150%); }
+.appearance-popover::before { content: ""; position: absolute; top: -6px; right: 15px; width: 10px; height: 10px; border-top: 1px solid var(--glass-border); border-left: 1px solid var(--glass-border); border-top-left-radius: 3px; background: var(--surface-strong); transform: rotate(45deg); }
+.appearance-popover .palette-row { margin-top: 0; gap: 11px; }
+.appearance-popover .custom-color-row { margin-top: 11px; padding-top: 10px; }
 .button { height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border: 1px solid transparent; border-radius: 11px; cursor: pointer; font-size: 10px; font-weight: 750; transition: .18s ease; }
 .button svg { width: 16px; height: 16px; }
 .button.secondary { border-color: var(--line); background: var(--surface-strong); box-shadow: inset 0 1px 0 var(--glass-highlight); color: var(--ink); }
@@ -475,7 +483,7 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .advanced-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; padding: 0 20px; border-top: 1px solid var(--line-soft); background: var(--surface-muted); }
 .compact-primary { min-width: 104px !important; }
 
-.toast-region { position: fixed; right: 26px; bottom: 94px; z-index: 60; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast-region { position: fixed; right: 26px; bottom: 24px; z-index: 60; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .toast { min-width: 260px; max-width: 380px; padding: 11px 13px; border: 1px solid var(--glass-border); border-left: 3px solid var(--accent); border-radius: 11px; background: var(--surface-strong); box-shadow: 0 18px 44px rgba(0,0,0,.16), inset 0 1px 0 var(--glass-highlight); backdrop-filter: blur(24px); color: var(--ink); font-size: 10px; animation: toast-in .22s ease; }
 .toast.error { border-left-color: var(--danger); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
@@ -493,5 +501,4 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
   .workspace { grid-template-columns: minmax(500px, 1.4fr) minmax(310px, .8fr); padding-inline: 16px; }
   .queue-item { grid-template-columns: 20px 52px minmax(0, 1fr) 158px 28px; }
   .result-action-button { padding-inline: 7px; }
-  .action-note { max-width: 360px; }
 }

@@ -216,8 +216,8 @@ async function main() {
     log(`  全部结束后状态: ${JSON.stringify(states)}`);
     assert(states.length === 2 && states.every((s) => s.regenDisabled === false), '全部结束后：两个按钮均可点击');
 
-    // 并发上限：已有 3 个批次时点击应被拒绝，不会发起
-    await renderer.evaluate(`state.activeBatches = new Set(['x1', 'x2', 'x3']); state.running = true; renderQueue(); 'ok'`);
+    // 并发上限：已有 3 个批次时点击应被拒绝，不会发起（显式固定上限为 3，不受本机设置影响）
+    await renderer.evaluate(`state.settings.maxConcurrentTasks = 3; state.activeBatches = new Set(['x1', 'x2', 'x3']); state.running = true; renderQueue(); 'ok'`);
     await renderer.evaluate(`(() => {
       const row = [...document.querySelectorAll('.queue-item')].find((item) => item.dataset.path === ${JSON.stringify(FILE_B)});
       row.querySelector('.regenerate-result').click();
@@ -226,6 +226,29 @@ async function main() {
     await sleep(200);
     const capped = await renderer.evaluate('window.__calls.length');
     assert(capped === 1, '达到 3 个并发上限时拒绝新的重新生成');
+
+    // 上限跟随「同时处理」设置：调到 5 后，3 个批次时仍可发起
+    await renderer.evaluate(`state.settings.maxConcurrentTasks = 5; 'ok'`);
+    await renderer.evaluate(`(() => {
+      const row = [...document.querySelectorAll('.queue-item')].find((item) => item.dataset.path === ${JSON.stringify(FILE_B)});
+      row.querySelector('.regenerate-result').click();
+      return true;
+    })()`);
+    await sleep(200);
+    const raised = await renderer.evaluate('window.__calls.length');
+    assert(raised === 2, '「同时处理」调到 5 后，3 个批次时仍可发起');
+
+    // 「同时处理」设置仅在开启多线程时显示
+    const controlVis = await renderer.evaluate(`(() => {
+      elements.parallelProcessing.checked = false; syncProcessingControls();
+      const hiddenWhenOff = elements.maxConcurrentControl.classList.contains('is-hidden');
+      elements.parallelProcessing.checked = true; syncProcessingControls();
+      const shownWhenOn = !elements.maxConcurrentControl.classList.contains('is-hidden');
+      elements.parallelProcessing.checked = false; syncProcessingControls();
+      return { hiddenWhenOff, shownWhenOn };
+    })()`);
+    assert(controlVis.hiddenWhenOff && controlVis.shownWhenOn, '「同时处理」设置仅在开启多线程时显示');
+    await renderer.evaluate(`state.settings.maxConcurrentTasks = 3; state.files.forEach((file) => { file.regenRequested = false; }); 'ok'`);
     await renderer.evaluate(`state.activeBatches = new Set(); state.running = false; renderQueue(); 'ok'`);
     await renderer.evaluate(`window.startBatchForFiles = window.__origStartBatchForFiles; 'ok'`);
 

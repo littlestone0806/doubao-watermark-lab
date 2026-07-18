@@ -73,14 +73,19 @@
               <input id="intervalSeconds" type="number" min="0" max="600" step="1" value="30">
               <span>秒</span>
             </label>
-            <label class="parallel-control" title="开启后同时处理多张图片（最多 3 个豆包窗口并行）；若频繁触发安全验证请关闭">
-              <input id="parallelProcessing" type="checkbox">
-              <span>多线程</span>
-            </label>
             <label class="interval-control" title="豆包回复结束后，继续等待图片出现的秒数；超过后判定为未生成。图片出得慢、被误判“没有生成图片”时可调大">
               <span>无图等待</span>
               <input id="imageWaitSeconds" type="number" min="5" max="300" step="1" value="60">
               <span>秒</span>
+            </label>
+            <label class="parallel-control" title="开启后同时处理多张图片（并行数量见右侧「同时处理」）；若频繁触发安全验证请关闭或调低数量">
+              <input id="parallelProcessing" type="checkbox">
+              <span>多线程</span>
+            </label>
+            <label class="interval-control is-hidden" id="maxConcurrentControl" title="最多同时处理的任务数（1-8）；数量越大内存占用越高，也越容易触发安全验证">
+              <span>同时处理</span>
+              <input id="maxConcurrentTasks" type="number" min="1" max="8" step="1" value="3">
+              <span>个</span>
             </label>
           </div>
           <div id="queueList" class="queue-list" aria-live="polite"></div>
@@ -126,27 +131,33 @@
                   <strong>界面外观</strong>
                   <span>选择深浅模式与玻璃色调</span>
                 </div>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.2-.8-2-2-2h-1.5a2.5 2.5 0 0 1-2.5-2.5V6c0-1.8-1.2-3-3-3Z"/><circle cx="7.5" cy="11" r=".8"/><circle cx="10" cy="7.5" r=".8"/><circle cx="8.5" cy="15" r=".8"/></svg>
+                <div class="appearance-popover-anchor">
+                  <button id="appearanceToggle" class="gear-button appearance-toggle" type="button" title="展开颜色设置" aria-label="展开颜色设置" aria-expanded="false">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9c0-1.2-.8-2-2-2h-1.5a2.5 2.5 0 0 1-2.5-2.5V6c0-1.8-1.2-3-3-3Z"/><circle cx="7.5" cy="11" r=".8"/><circle cx="10" cy="7.5" r=".8"/><circle cx="8.5" cy="15" r=".8"/></svg>
+                  </button>
+                  <div id="appearanceColors" class="appearance-popover is-hidden" aria-label="颜色设置">
+                    <div id="paletteControl" class="palette-row" aria-label="界面调色盘">
+                      <button type="button" data-palette="forest" title="森屿绿"><span></span></button>
+                      <button type="button" data-palette="ocean" title="湖海蓝"><span></span></button>
+                      <button type="button" data-palette="violet" title="暮光紫"><span></span></button>
+                      <button type="button" data-palette="sunset" title="落日橙"><span></span></button>
+                      <button type="button" data-palette="graphite" title="石墨灰"><span></span></button>
+                    </div>
+                    <div class="custom-color-row">
+                      <span>自定义主题色</span>
+                      <label id="customColorControl" class="custom-color-control" title="选择任意颜色">
+                        <input id="themeColor" type="color" value="#246b55" aria-label="选择自定义主题色">
+                        <span class="custom-color-preview" aria-hidden="true"></span>
+                        <output id="themeColorValue">#246B55</output>
+                      </label>
+                    </div>
+                  </div>
+                </div>
               </div>
               <div id="themeModeControl" class="theme-segments" aria-label="界面明暗模式">
                 <button type="button" data-theme-mode="auto">自动</button>
                 <button type="button" data-theme-mode="light">浅色</button>
                 <button type="button" data-theme-mode="dark">深色</button>
-              </div>
-              <div id="paletteControl" class="palette-row" aria-label="界面调色盘">
-                <button type="button" data-palette="forest" title="森屿绿"><span></span></button>
-                <button type="button" data-palette="ocean" title="湖海蓝"><span></span></button>
-                <button type="button" data-palette="violet" title="暮光紫"><span></span></button>
-                <button type="button" data-palette="sunset" title="落日橙"><span></span></button>
-                <button type="button" data-palette="graphite" title="石墨灰"><span></span></button>
-              </div>
-              <div class="custom-color-row">
-                <span>自定义主题色</span>
-                <label id="customColorControl" class="custom-color-control" title="选择任意颜色">
-                  <input id="themeColor" type="color" value="#246b55" aria-label="选择自定义主题色">
-                  <span class="custom-color-preview" aria-hidden="true"></span>
-                  <output id="themeColorValue">#246B55</output>
-                </label>
               </div>
             </div>
 
@@ -159,24 +170,18 @@
               <div class="output-hint">处理完成的图片会自动保存到这里</div>
             </div>
           </div>
+
+          <div class="settings-actions">
+            <button id="openOutputButton" class="button ghost" type="button">打开输出目录</button>
+            <button id="cancelButton" class="button danger is-hidden" type="button">停止任务</button>
+            <button id="startButton" class="button primary" type="button" disabled>
+              <span class="button-label">开始批量处理</span>
+              <span class="button-count" id="startCount">0</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+            </button>
+          </div>
         </aside>
       </main>
-
-      <footer class="action-bar">
-        <div class="action-note">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 8v5M12 17h.01"/></svg>
-          <span>出现安全验证时任务会暂停并打开豆包窗口，请手动完成后继续。</span>
-        </div>
-        <div class="action-buttons">
-          <button id="openOutputButton" class="button ghost" type="button">打开输出目录</button>
-          <button id="cancelButton" class="button danger is-hidden" type="button">停止任务</button>
-          <button id="startButton" class="button primary" type="button" disabled>
-            <span class="button-label">开始批量处理</span>
-            <span class="button-count" id="startCount">0</span>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
-          </button>
-        </div>
-      </footer>
     </div>
 
     <div id="advancedSettingsModal" class="advanced-modal is-hidden" aria-hidden="true">

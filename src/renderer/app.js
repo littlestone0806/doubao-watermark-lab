@@ -26,6 +26,8 @@ const elements = {
   intervalSeconds: document.querySelector('#intervalSeconds'),
   imageWaitSeconds: document.querySelector('#imageWaitSeconds'),
   parallelProcessing: document.querySelector('#parallelProcessing'),
+  maxConcurrentControl: document.querySelector('#maxConcurrentControl'),
+  maxConcurrentTasks: document.querySelector('#maxConcurrentTasks'),
   strategySummaryText: document.querySelector('#strategySummaryText'),
   advancedSettingsButton: document.querySelector('#advancedSettingsButton'),
   showBrowserWindow: document.querySelector('#showBrowserWindow'),
@@ -34,6 +36,8 @@ const elements = {
   themeColor: document.querySelector('#themeColor'),
   themeColorValue: document.querySelector('#themeColorValue'),
   customColorControl: document.querySelector('#customColorControl'),
+  appearanceToggle: document.querySelector('#appearanceToggle'),
+  appearanceColors: document.querySelector('#appearanceColors'),
   outputButton: document.querySelector('#outputButton'),
   outputPath: document.querySelector('#outputPath'),
   openOutputButton: document.querySelector('#openOutputButton'),
@@ -94,7 +98,8 @@ function readSettings() {
     showBrowserWindow: elements.showBrowserWindow.checked,
     intervalSeconds: Math.min(600, Math.max(0, Math.round(Number(elements.intervalSeconds.value) || 0))),
     imageWaitSeconds: Math.min(300, Math.max(5, Math.round(Number(elements.imageWaitSeconds.value) || 60))),
-    parallelProcessing: elements.parallelProcessing.checked
+    parallelProcessing: elements.parallelProcessing.checked,
+    maxConcurrentTasks: Math.min(8, Math.max(1, Math.round(Number(elements.maxConcurrentTasks.value) || 3)))
   };
 }
 
@@ -114,6 +119,7 @@ function applySettings(settings) {
   elements.intervalSeconds.value = String(settings.intervalSeconds ?? 30);
   elements.imageWaitSeconds.value = String(settings.imageWaitSeconds ?? 60);
   elements.parallelProcessing.checked = settings.parallelProcessing === true;
+  elements.maxConcurrentTasks.value = String(settings.maxConcurrentTasks ?? 3);
   syncProcessingControls();
   elements.outputPath.textContent = settings.outputDirectory;
   elements.outputPath.title = settings.outputDirectory;
@@ -324,11 +330,12 @@ async function startBatchForFiles(files) {
 }
 
 // 单张重新生成：效果等同于只勾选这一张再点“开始批量处理”。
-// 其他任务正在运行时点击会立即并发执行（最多 3 个任务同时处理）。
+// 其他任务正在运行时点击会立即并发执行（同时处理的任务数由设置决定）。
 async function regenerateFile(file) {
   if (file.missing || file.regenRequested || file.status === 'active') return;
-  if (state.activeBatches.size >= 3) {
-    toast('最多同时处理 3 张图片，请等待其中一张完成', 'error');
+  const maxConcurrent = state.settings?.maxConcurrentTasks || 3;
+  if (state.activeBatches.size >= maxConcurrent) {
+    toast(`最多同时处理 ${maxConcurrent} 张图片，请等待其中一张完成`, 'error');
     return;
   }
   updateFile(file.path, { regenRequested: true });
@@ -339,8 +346,9 @@ async function handleManualSubmitted(payload = {}) {
   const sourcePath = typeof payload.sourcePath === 'string' ? payload.sourcePath : '';
   const strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
   if (!sourcePath || !strokes.length) return;
-  if (state.activeBatches.size >= 3) {
-    toast('最多同时处理 3 张图片，请等待其中一张完成', 'error');
+  const maxConcurrent = state.settings?.maxConcurrentTasks || 3;
+  if (state.activeBatches.size >= maxConcurrent) {
+    toast(`最多同时处理 ${maxConcurrent} 张图片，请等待其中一张完成`, 'error');
     return;
   }
   const file = state.files.find((item) => item.path === sourcePath);
@@ -383,6 +391,8 @@ function syncProcessingControls() {
   elements.parallelProcessing.disabled = state.running;
   elements.imageWaitSeconds.disabled = state.running;
   elements.intervalSeconds.disabled = state.running || elements.parallelProcessing.checked;
+  elements.maxConcurrentControl.classList.toggle('is-hidden', !elements.parallelProcessing.checked);
+  elements.maxConcurrentTasks.disabled = state.running || !elements.parallelProcessing.checked;
 }
 
 function syncActionState() {
@@ -700,6 +710,7 @@ elements.selectAllCheckbox.addEventListener('change', () => {
 elements.showBrowserWindow.addEventListener('change', scheduleSettingsSave);
 elements.intervalSeconds.addEventListener('change', scheduleSettingsSave);
 elements.imageWaitSeconds.addEventListener('change', scheduleSettingsSave);
+elements.maxConcurrentTasks.addEventListener('change', scheduleSettingsSave);
 elements.parallelProcessing.addEventListener('change', () => {
   syncProcessingControls();
   scheduleSettingsSave();
@@ -724,6 +735,23 @@ elements.themeColor.addEventListener('input', () => {
   };
   applyAppearance(state.settings);
   scheduleSettingsSave();
+});
+function setAppearancePopover(open) {
+  elements.appearanceColors.classList.toggle('is-hidden', !open);
+  elements.appearanceToggle.setAttribute('aria-expanded', String(open));
+  elements.appearanceToggle.title = open ? '收起颜色设置' : '展开颜色设置';
+}
+elements.appearanceToggle.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setAppearancePopover(elements.appearanceColors.classList.contains('is-hidden'));
+});
+document.addEventListener('click', (event) => {
+  if (elements.appearanceColors.classList.contains('is-hidden')) return;
+  if (event.target.closest('.appearance-popover-anchor')) return;
+  setAppearancePopover(false);
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !elements.appearanceColors.classList.contains('is-hidden')) setAppearancePopover(false);
 });
 elements.advancedSettingsButton.addEventListener('click', openAdvancedSettings);
 elements.advancedSettingsBackdrop.addEventListener('click', closeAdvancedSettings);
