@@ -1,6 +1,6 @@
 'use strict';
 
-// 安全验证中断生成后的自动恢复测试：
+// 安全验证后整任务重启的自动化层测试：
 // 利用 runInPage 会把页面函数序列化后交给 webContents.executeJavaScript 的特点，
 // 用假 webContents 按函数名分发预设的页面状态，在 Node 里模拟整个等待流程。
 const test = require('node:test');
@@ -20,8 +20,8 @@ const GENERATED_IMAGE = {
   generatedContainer: true
 };
 
-function createHarness({ verificationPlan, snapshotPlan, onRegenerate }) {
-  const state = { verificationChecks: 0, snapshotCalls: 0, regenerateClicks: 0 };
+function createHarness({ verificationPlan, snapshotPlan, shouldRestart }) {
+  const state = { verificationChecks: 0, snapshotCalls: 0 };
   const progress = [];
   const webContents = {
     session: {},
@@ -29,10 +29,6 @@ function createHarness({ verificationPlan, snapshotPlan, onRegenerate }) {
       if (source.includes('pageVerificationState')) {
         state.verificationChecks += 1;
         return verificationPlan(state);
-      }
-      if (source.includes('clickRegenerateReply')) {
-        state.regenerateClicks += 1;
-        return onRegenerate ? onRegenerate(state) : false;
       }
       if (source.includes('pageImageSnapshot')) {
         state.snapshotCalls += 1;
@@ -54,6 +50,7 @@ function createHarness({ verificationPlan, snapshotPlan, onRegenerate }) {
   };
   const automation = new DoubaoAutomation(windowStub, {
     isCancelled: () => false,
+    shouldRestart: shouldRestart || (() => false),
     onProgress: (message) => progress.push(message)
   });
   const capture = { candidates: new Map(), stop() {} };
@@ -63,59 +60,52 @@ function createHarness({ verificationPlan, snapshotPlan, onRegenerate }) {
 // 验证只出现一次（进入 waitForVerificationIfNeeded 时检测到，轮询时已消失）
 const verificationOnce = (state) => ({ detected: state.verificationChecks === 1 });
 const noVerification = () => ({ detected: false });
-const finishedReplyWithoutImage = {
-  images: [],
-  generating: false,
-  finishedReplies: 1,
-  followUps: 0,
-  tailText: '好的',
-  assistantTailText: '好的'
-};
 
-test('安全验证中断生成后：自动重新发送并等到图片', async () => {
-  let postRetrySnapshots = 0;
+test('手动完成安全验证后：抛出 VERIFICATION_INTERRUPTED 让调度方整任务重启', async () => {
   const harness = createHarness({
     verificationPlan: verificationOnce,
-    onRegenerate: () => true,
-    snapshotPlan: (state) => {
-      if (!state.regenerateClicks) return finishedReplyWithoutImage;
-      postRetrySnapshots += 1;
-      if (postRetrySnapshots <= 2) {
-        return { images: [], generating: true, finishedReplies: 1, followUps: 0, tailText: '正在生成', assistantTailText: '' };
-      }
-      return { images: [GENERATED_IMAGE], generating: false, finishedReplies: 1, followUps: 0, tailText: '图片已生成', assistantTailText: '图片已生成' };
+    snapshotPlan: () => {
+      throw new Error('验证完成后不应再读取页面快照');
     }
   });
-  const result = await harness.automation.waitForGeneratedImage(new Set(), harness.capture, 90_000, {
-    baselineFinishedReplies: 0,
-    noImageGraceMs: 8_000
-  });
-  assert.equal(harness.state.regenerateClicks, 1);
-  assert.ok(result.some((item) => item.url === GENERATED_IMAGE.url && item.source === 'dom'));
-  assert.ok(harness.progress.some((message) => message.includes('已自动重新发送（第 1 次）')));
-});
-
-test('安全验证中断后找不到重新生成按钮：宽限到期仍报 NO_IMAGE_GENERATED', async () => {
-  const harness = createHarness({
-    verificationPlan: verificationOnce,
-    onRegenerate: () => false,
-    snapshotPlan: () => finishedReplyWithoutImage
-  });
   await assert.rejects(
-    harness.automation.waitForGeneratedImage(new Set(), harness.capture, 90_000, {
-      baselineFinishedReplies: 0,
-      noImageGraceMs: 3_000
-    }),
+    harness.automation.waitForGeneratedImage(new Set(), harness.capture, 30_000, {}),
     (error) => {
-      assert.equal(error.code, 'NO_IMAGE_GENERATED');
-      assert.match(error.message, /提示词可能不合适/);
+      assert.equal(error.code, 'VERIFICATION_INTERRUPTED');
       return true;
     }
   );
-  assert.ok(harness.state.regenerateClicks >= 1);
+  assert.ok(harness.progress.some((message) => message.includes('正在重新开始任务')));
 });
 
-test('无安全验证时正常等待图片出现，不触发重新发送', async () => {
+test('同批其他任务完成验证后：本任务收到重启信号立即中断等待', async () => {
+  const harness = createHarness({
+    verificationPlan: noVerification,
+    // 模拟页面还在正常生成中，但批次信号要求整任务重启
+    snapshotPlan: () => ({
+      images: [],
+      generating: true,
+      finishedReplies: 0,
+      followUps: 0,
+      tailText: '正在生成',
+      assistantTailText: ''
+    })
+  });
+  // 调度方在批次信号变化后让 shouldRestart 返回 true（这里等两轮轮询模拟信号迟来）
+  harness.automation.shouldRestart = () => harness.state.snapshotCalls >= 2;
+  const startedAt = Date.now();
+  await assert.rejects(
+    harness.automation.waitForGeneratedImage(new Set(), harness.capture, 120_000, {}),
+    (error) => {
+      assert.equal(error.code, 'VERIFICATION_INTERRUPTED');
+      return true;
+    }
+  );
+  // 两个轮询周期内就该中断，而不是等到超时
+  assert.ok(Date.now() - startedAt < 15_000, '重启信号应及时中断等待');
+});
+
+test('无验证、无重启信号时：正常等到图片出现', async () => {
   const harness = createHarness({
     verificationPlan: noVerification,
     snapshotPlan: () => ({
@@ -127,29 +117,6 @@ test('无安全验证时正常等待图片出现，不触发重新发送', async
       assistantTailText: '图片已生成'
     })
   });
-  const result = await harness.automation.waitForGeneratedImage(new Set(), harness.capture, 60_000, {
-    baselineFinishedReplies: 0,
-    noImageGraceMs: 5_000
-  });
-  assert.equal(harness.state.regenerateClicks, 0);
+  const result = await harness.automation.waitForGeneratedImage(new Set(), harness.capture, 60_000, {});
   assert.ok(result.some((item) => item.url === GENERATED_IMAGE.url));
-});
-
-test('自动重新发送最多尝试两次，之后仍报错', async () => {
-  const harness = createHarness({
-    verificationPlan: verificationOnce,
-    onRegenerate: () => true,
-    snapshotPlan: () => finishedReplyWithoutImage
-  });
-  await assert.rejects(
-    harness.automation.waitForGeneratedImage(new Set(), harness.capture, 90_000, {
-      baselineFinishedReplies: 0,
-      noImageGraceMs: 3_000
-    }),
-    (error) => {
-      assert.equal(error.code, 'NO_IMAGE_GENERATED');
-      return true;
-    }
-  );
-  assert.equal(harness.state.regenerateClicks, 2);
 });

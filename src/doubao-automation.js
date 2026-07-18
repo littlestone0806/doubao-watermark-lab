@@ -24,6 +24,15 @@ function assertNotCancelled(isCancelled) {
   }
 }
 
+// 同批其他任务完成安全验证后，本任务也可能已被风控波及：抛出专属错误，由调度方整任务重启
+function assertNotRestarted(shouldRestart) {
+  if (shouldRestart?.()) {
+    const error = new Error('安全验证已中断本次任务');
+    error.code = 'VERIFICATION_INTERRUPTED';
+    throw error;
+  }
+}
+
 async function waitFor(predicate, {
   timeout = 20_000,
   interval = 500,
@@ -482,25 +491,6 @@ function clickNewConversation() {
   return true;
 }
 
-// 点击最后一条回复的“重新生成”：安全验证中断生成后，豆包不会自己补图，需要重新触发
-function clickRegenerateReply() {
-  const visible = (element) => {
-    const rect = element.getBoundingClientRect();
-    const style = getComputedStyle(element);
-    return rect.width > 2 && rect.height > 2 && style.visibility !== 'hidden' && style.display !== 'none';
-  };
-  const candidates = [...document.querySelectorAll('button, [role="button"], a')]
-    .filter(visible)
-    .filter((element) => /重新生成|重新回答/.test(
-      `${element.innerText || ''} ${element.getAttribute('aria-label') || ''} ${element.title || ''}`
-    ));
-  const target = candidates.at(-1);
-  if (!target) return false;
-  target.scrollIntoView({ block: 'center' });
-  target.click();
-  return true;
-}
-
 function responseHeader(headers, name) {
   if (!headers) return '';
   const targetName = String(name).toLowerCase();
@@ -587,6 +577,8 @@ class DoubaoAutomation {
     this.webContents = browserWindow.webContents;
     this.session = this.webContents.session;
     this.isCancelled = options.isCancelled || (() => false);
+    // 任一任务完成安全验证后，同批其他任务也会被风控波及：由调度方通过该回调通知整任务重启
+    this.shouldRestart = options.shouldRestart || (() => false);
     this.onProgress = options.onProgress || (() => {});
     this.onVerificationRequired = options.onVerificationRequired || null;
     this.onVerificationCleared = options.onVerificationCleared || null;
@@ -600,6 +592,7 @@ class DoubaoAutomation {
   }
 
   async waitForVerificationIfNeeded(maxWaitMs = 10 * 60_000) {
+    assertNotRestarted(this.shouldRestart);
     const first = await runInPage(this.webContents, pageVerificationState, VERIFICATION_PATTERN.source)
       .catch(() => ({ detected: false }));
     if (!first?.detected) return { waitedMs: 0, detected: false };
@@ -626,8 +619,12 @@ class DoubaoAutomation {
         } else if (!wasVisible && !this.window.isDestroyed()) {
           this.window.hide();
         }
-        this.onProgress('安全验证已完成，正在继续任务');
-        return { waitedMs: Date.now() - started, detected: true };
+        this.onProgress('安全验证已完成，正在重新开始任务');
+        // 验证中断后豆包可能假死（一直“生成中”）或静默放弃本次生成，
+        // 继续等待不可靠：抛出专属错误，由调度方整任务重新开始
+        const error = new Error('安全验证已中断本次任务');
+        error.code = 'VERIFICATION_INTERRUPTED';
+        throw error;
       }
     }
     throw new Error('等待手动完成豆包安全验证超时；请完成验证后重新开始任务');
@@ -840,48 +837,11 @@ class DoubaoAutomation {
     let tailStableSince = Date.now();
     const baselineAssetKeys = new Set([...baselineUrls].map(imageAssetKey).filter(Boolean));
     const promptTailEcho = String(promptText || '').replace(/\s+/g, '').slice(-24);
-    // 安全验证中断生成后的自动重发：豆包被验证打断后通常直接结束回复、不再补图，
-    // 干等宽限期只会报错，这里像人一样点“重新生成”恢复任务
-    let verificationInterrupted = false;
-    let regenerateAttempts = 0;
-    let postVerifyRetryUntil = 0;
-    const maxRegenerateAttempts = 2;
-    const tryRegenerate = async (snapshot) => {
-      if (!verificationInterrupted || regenerateAttempts >= maxRegenerateAttempts) return false;
-      const clicked = await runInPage(this.webContents, clickRegenerateReply).catch(() => false);
-      if (!clicked) return false;
-      regenerateAttempts += 1;
-      // “重新生成”会替换上一条回复：新回复完成时按钮总数回到原值，基线减一才能感知完成
-      baselineFinishedReplies = Math.max(0, (Number(snapshot?.finishedReplies) || 0) - 1);
-      baselineFollowUps = 0;
-      sawReplyFinished = false;
-      sawGenerating = false;
-      sawStreaming = false;
-      generationDoneSince = 0;
-      idleSince = 0;
-      firstCandidateAt = 0;
-      lastSignature = '';
-      stableSince = 0;
-      lastTailText = String(snapshot?.tailText || '');
-      tailStableSince = Date.now();
-      postVerifyRetryUntil = 0;
-      this.onProgress(`安全验证中断了生成，已自动重新发送（第 ${regenerateAttempts} 次）`);
-      return true;
-    };
 
     while (Date.now() - started - verificationWaitMs < timeoutMs) {
       assertNotCancelled(this.isCancelled);
+      assertNotRestarted(this.shouldRestart);
       const verification = await this.waitForVerificationIfNeeded();
-      if (verification.waitedMs > 0) {
-        verificationInterrupted = true;
-        postVerifyRetryUntil = Date.now() + 15_000;
-        // 验证期间的等待不计入各类计时：时钟整体后移，宽限期从验证结束后重新算起
-        stableSince += verification.waitedMs;
-        tailStableSince += verification.waitedMs;
-        if (firstCandidateAt) firstCandidateAt += verification.waitedMs;
-        if (idleSince) idleSince += verification.waitedMs;
-        if (generationDoneSince) generationDoneSince += verification.waitedMs;
-      }
       verificationWaitMs += verification.waitedMs;
       const snapshot = await runInPage(this.webContents, pageImageSnapshot);
       latestDomCandidates = snapshot.images
@@ -950,26 +910,15 @@ class DoubaoAutomation {
         }
       }
 
-      // 验证完成后的短窗口内：一旦判定回复已结束且没有图，立即自动重新生成，不干等宽限期
-      if (postVerifyRetryUntil && Date.now() < postVerifyRetryUntil
-        && !candidateCount && !pendingImageCount && !snapshot.generating) {
-        const settledAfterVerify = sawReplyFinished || ((sawGenerating || sawStreaming) && tailQuietMs > 4_000);
-        if (settledAfterVerify && await tryRegenerate(snapshot)) continue;
-      }
-
       if (!candidateCount && !pendingImageCount && generationDoneSince && Date.now() - generationDoneSince > noImageGraceMs) {
-        if (await tryRegenerate(snapshot)) continue;
         throw noImageGeneratedError(snapshot.assistantTailText || snapshot.tailText, promptText);
       }
-      const elapsedMs = Date.now() - started - verificationWaitMs;
-      if (!candidateCount && elapsedMs > 35_000 && /抱歉|无法处理|不能完成|未能生成/.test(snapshot.tailText)) {
-        if (await tryRegenerate(snapshot)) continue;
+      if (!candidateCount && Date.now() - started > 35_000 && /抱歉|无法处理|不能完成|未能生成/.test(snapshot.tailText)) {
         const textOnlyError = new Error('豆包返回了文字提示，但没有生成图片；可调整提示词后重试');
         textOnlyError.code = 'NO_IMAGE_GENERATED';
         throw textOnlyError;
       }
-      if (!candidateCount && idleSince && elapsedMs > 90_000 && Date.now() - idleSince > 45_000) {
-        if (await tryRegenerate(snapshot)) continue;
+      if (!candidateCount && idleSince && Date.now() - started > 90_000 && Date.now() - idleSince > 45_000) {
         throw noImageGeneratedError(snapshot.assistantTailText || snapshot.tailText, promptText);
       }
       await sleep(1400);

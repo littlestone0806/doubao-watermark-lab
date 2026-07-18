@@ -55,7 +55,7 @@ const DEFAULT_SETTINGS = {
   cropCompensationPercent: 0.5,
   intervalSeconds: 30,
   imageWaitSeconds: 60,
-  parallelProcessing: false,
+  parallelProcessing: true,
   showBrowserWindow: false,
   themeMode: 'auto',
   colorPalette: 'forest',
@@ -634,8 +634,10 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
   const results = [];
   // 并行模式下正在被使用的历史会话，避免两个任务同时写进同一会话
   const inUseConversations = new Set();
+  // 批次级安全验证信号：任一任务完成验证后递增，正在执行的其他任务据此整任务重启
+  const verificationEpoch = { value: 0 };
 
-  const processAt = async (index, workerWindow) => {
+  const processAttempt = async (index, workerWindow, epochRef) => {
     const file = files[index];
     const eventPath = files.length === 1 && runtime.eventPath ? runtime.eventPath : file.path;
     const sourcePath = files.length === 1 && runtime.sourcePath ? runtime.sourcePath : file.path;
@@ -651,6 +653,8 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
 
     const automation = new DoubaoAutomation(workerWindow, {
       isCancelled: () => cancelRef.value,
+      // 信号值大于本任务基线，说明有任务完成了安全验证：本任务也可能已被波及，整任务重启
+      shouldRestart: () => verificationEpoch.value > epochRef.value,
       onProgress: (message) => batchEvent({ type: 'job-progress', ...jobBase, message }),
       onVerificationRequired: () => {
         const persistentSession = session.fromPartition(DOUBAO_PARTITION);
@@ -668,6 +672,7 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
         batchEvent({ type: 'verification-required', ...jobBase });
       },
       onVerificationCleared: () => {
+        verificationEpoch.value += 1;
         if (!settings.showBrowserWindow) {
           if (workerWindow && !workerWindow.isDestroyed()) workerWindow.hide();
           hideIdleDoubaoWindows();
@@ -763,6 +768,7 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
       batchEvent({ type: 'job-complete', ...result });
     } catch (error) {
       if (error.code === 'CANCELLED' || cancelRef.value) return;
+      if (error.code === 'VERIFICATION_INTERRUPTED') return 'retry';
       const result = {
         ...jobBase,
         error: error.message || String(error),
@@ -775,6 +781,46 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
       if (paddedUpload?.directory) {
         await fs.rm(paddedUpload.directory, { recursive: true, force: true }).catch(() => {});
       }
+    }
+  };
+
+  // 安全验证完成后整任务重启：验证中断后豆包可能假死或静默放弃生成，重跑是最可靠的恢复。
+  // 每个任务最多重启 2 次；多线程下同批正在执行的任务也会收到信号一并重启
+  const processAt = async (index, workerWindow) => {
+    const maxVerificationRestarts = 2;
+    const epochRef = { value: verificationEpoch.value };
+    for (let attempt = 0; ; attempt += 1) {
+      const outcome = await processAttempt(index, workerWindow, epochRef);
+      if (outcome !== 'retry' || cancelRef.value) return;
+      if (attempt >= maxVerificationRestarts) {
+        const file = files[index];
+        const eventPath = files.length === 1 && runtime.eventPath ? runtime.eventPath : file.path;
+        const sourcePath = files.length === 1 && runtime.sourcePath ? runtime.sourcePath : file.path;
+        const result = {
+          index,
+          batchId,
+          path: eventPath,
+          name: path.basename(sourcePath),
+          total: files.length,
+          mode,
+          error: '安全验证后任务仍被中断，请稍后重新开始该任务',
+          conversationId: typeof files[index].conversationId === 'string' ? files[index].conversationId : ''
+        };
+        results.push(result);
+        batchEvent({ type: 'job-error', ...result });
+        return;
+      }
+      epochRef.value = verificationEpoch.value;
+      batchEvent({
+        type: 'job-progress',
+        index,
+        batchId,
+        path: files.length === 1 && runtime.eventPath ? runtime.eventPath : files[index].path,
+        name: path.basename(files.length === 1 && runtime.sourcePath ? runtime.sourcePath : files[index].path),
+        total: files.length,
+        mode,
+        message: `安全验证已中断任务，正在重新开始（第 ${attempt + 1}/${maxVerificationRestarts} 次）`
+      });
     }
   };
 

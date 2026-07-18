@@ -607,7 +607,7 @@ function handleBatchEvent(event) {
     toast('豆包触发了安全验证，已暂停任务并显示验证窗口，请手动完成');
   }
   if (event.type === 'verification-cleared') {
-    toast('安全验证已完成，任务将自动继续');
+    toast('安全验证已完成，正在重新开始被中断的任务');
   }
   if (event.type === 'job-complete') {
     const source = state.files.find((file) => file.path === event.sourcePath);
