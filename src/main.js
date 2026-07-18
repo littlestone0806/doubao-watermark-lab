@@ -6,6 +6,7 @@ const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { computeDiffStats, verdictForStats, buildHeatmap } = require('./qc-check');
+const { hueOfColor, retintPixels } = require('./theme-icon');
 const { DoubaoAutomation, DOUBAO_CHAT_URL } = require('./doubao-automation');
 const {
   downloadBestImage,
@@ -150,6 +151,31 @@ async function saveSettings(settings) {
   await fs.writeFile(temporary, JSON.stringify(sanitized, null, 2), 'utf8');
   await fs.rename(temporary, settingsPath());
   return sanitized;
+}
+
+// Dock（macOS）与窗口/任务栏（Windows）图标随主题色变化：
+// 只旋转图标中绿色系像素的色相，白色/金色条纹与渐变质感保持不变；按色相缓存避免重复计算
+let baseIconCache = null;
+let themedIcon = null;
+let appliedIconHue = null;
+function updateThemedIcon(themeColor) {
+  const targetHue = hueOfColor(themeColor);
+  if (targetHue === null) return;
+  if (targetHue !== appliedIconHue) {
+    if (!baseIconCache) {
+      const image = nativeImage.createFromPath(APP_ICON_PATH);
+      if (image.isEmpty()) return;
+      const resized = image.resize({ width: 512, height: 512, quality: 'good' });
+      const { width, height } = resized.getSize();
+      baseIconCache = { pixels: resized.toBitmap(), width, height };
+    }
+    const tinted = retintPixels(baseIconCache.pixels, targetHue);
+    themedIcon = nativeImage.createFromBitmap(tinted, { width: baseIconCache.width, height: baseIconCache.height });
+    appliedIconHue = targetHue;
+  }
+  if (!themedIcon || themedIcon.isEmpty()) return;
+  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(themedIcon);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(themedIcon);
 }
 
 function sanitizeQueueRecord(record = {}) {
@@ -1159,7 +1185,11 @@ function registerIpc() {
   ipcMain.on('advanced:close', () => {
     if (advancedWindow && !advancedWindow.isDestroyed()) advancedWindow.close();
   });
-  ipcMain.handle('settings:save', (_event, value) => saveSettings(value));
+  ipcMain.handle('settings:save', async (_event, value) => {
+    const saved = await saveSettings(value);
+    updateThemedIcon(saved.themeColor);
+    return saved;
+  });
   ipcMain.handle('queue:get', loadQueueRecords);
   ipcMain.handle('queue:save', (_event, records) => saveQueueRecords(records));
   ipcMain.handle('login:open', openDoubaoLogin);
@@ -1349,12 +1379,13 @@ app.whenReady().then(async () => {
   // 应用不使用系统菜单栏（macOS 顶部菜单与 Windows 窗口菜单一并移除）
   Menu.setApplicationMenu(null);
   registerEditShortcuts();
-  const appIcon = nativeImage.createFromPath(APP_ICON_PATH);
-  if (process.platform === 'darwin' && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
   configureDoubaoSession();
   registerIpc();
   createMainWindow();
   setupAutoUpdater();
+  // 按当前主题色着色 Dock/窗口图标（窗口创建后调用，窗口图标一并生效）
+  const settings = await loadSettings();
+  updateThemedIcon(settings.themeColor);
   await broadcastLoginStatus();
   app.on('activate', () => {
     // 退出过程中不再重建窗口，避免关闭后 Dock 点击又拉起主窗口
