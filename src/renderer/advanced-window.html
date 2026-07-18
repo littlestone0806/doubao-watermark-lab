@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self';">
+    <title>高级处理设置</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="advanced-window.css">
+  </head>
+  <body>
+    <main class="advanced-shell">
+      <header class="advanced-head">
+        <div>
+          <strong id="advancedSettingsTitle">高级处理设置</strong>
+          <span>调整后会自动保存，并应用到下一次任务</span>
+        </div>
+      </header>
+      <div class="advanced-body">
+        <div class="advanced-field">
+          <div class="advanced-label-line">
+            <label for="advancedPrompt">豆包提示词</label>
+            <span><output id="advancedPromptCount">0</output> / 4000</span>
+          </div>
+          <textarea id="advancedPrompt" maxlength="4000" rows="6" spellcheck="false"></textarea>
+        </div>
+
+        <div class="advanced-field">
+          <div class="advanced-label-line">
+            <label for="advancedManualPrompt">涂抹重绘提示词</label>
+            <span><output id="advancedManualPromptCount">0</output> / 4000</span>
+          </div>
+          <textarea id="advancedManualPrompt" maxlength="4000" rows="6" spellcheck="false"></textarea>
+          <span class="advanced-hint">手动涂抹后发送给豆包的局部修复指令；留空则恢复默认</span>
+        </div>
+
+        <div class="advanced-grid">
+          <div class="advanced-field">
+            <label for="advancedCropEdge">隔离带与裁切位置</label>
+            <select id="advancedCropEdge">
+              <option value="top">顶部</option>
+              <option value="bottom">底部</option>
+            </select>
+          </div>
+          <div class="advanced-field">
+            <div class="advanced-label-line">
+              <label for="advancedCropPercent">隔离带与基础裁切比例</label>
+              <output id="advancedCropPercentOutput">10%</output>
+            </div>
+            <input id="advancedCropPercent" type="range" min="10" max="25" step="1" value="10">
+            <span class="advanced-hint">比例越大，越容易完整容纳 AI 标识</span>
+          </div>
+        </div>
+
+        <div class="advanced-field compensation-field">
+          <div class="advanced-label-line">
+            <label for="advancedCompensation">白边补偿裁切</label>
+            <output id="advancedCompensationOutput">0.5%</output>
+          </div>
+          <input id="advancedCompensation" type="range" min="0" max="3" step="0.1" value="0.5">
+          <span class="advanced-hint">恢复原图比例后再向内裁少量边缘；建议保持 0.5%</span>
+        </div>
+      </div>
+      <footer class="advanced-actions">
+        <button id="advancedSettingsCancel" class="button ghost" type="button">取消</button>
+        <button id="advancedSettingsSave" class="button primary compact-primary" type="button">保存设置</button>
+      </footer>
+    </main>
+    <div id="toastRegion" class="toast-region" aria-live="polite"></div>
+    <script src="advanced-window.js"></script>
+  </body>
+</html>

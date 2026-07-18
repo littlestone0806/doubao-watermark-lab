@@ -72,6 +72,17 @@ function resetView() {
   applyTransform();
 }
 
+// 初始即按舞台大小铺满显示（小图也放大到合适尺寸），缩放再以此为基础
+function fitImageToStage() {
+  const naturalWidth = elements.image.naturalWidth;
+  const naturalHeight = elements.image.naturalHeight;
+  if (!naturalWidth || !naturalHeight) return;
+  const stageWidth = Math.max(1, elements.stage.clientWidth - 28);
+  const stageHeight = Math.max(1, elements.stage.clientHeight - 28);
+  const fit = Math.min(stageWidth / naturalWidth, stageHeight / naturalHeight);
+  elements.image.style.width = `${Math.max(1, Math.round(naturalWidth * fit))}px`;
+}
+
 window.previewBridge.onLoad((preview) => {
   document.title = `预览 · ${preview.name}`;
   elements.title.textContent = preview.name;
@@ -81,6 +92,7 @@ window.previewBridge.onLoad((preview) => {
   elements.image.onload = () => {
     elements.loading.classList.add('is-hidden');
     elements.image.classList.remove('is-hidden');
+    fitImageToStage();
     requestAnimationFrame(resetView);
   };
   elements.image.src = preview.dataUrl;
@@ -121,7 +133,10 @@ function endDrag(event) {
 }
 elements.image.addEventListener('pointerup', endDrag);
 elements.image.addEventListener('pointercancel', endDrag);
-window.addEventListener('resize', applyTransform);
+window.addEventListener('resize', () => {
+  fitImageToStage();
+  applyTransform();
+});
 document.addEventListener('keydown', (event) => {
   if (!(event.metaKey || event.ctrlKey)) return;
   if (event.key === '+' || event.key === '=') {

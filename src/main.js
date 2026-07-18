@@ -1,6 +1,7 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, session } = require('electron');
+const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { DoubaoAutomation, DOUBAO_CHAT_URL } = require('./doubao-automation');
@@ -15,6 +16,14 @@ const { buildManualEditPrompt, buildPrompt, DEFAULT_PROMPT, MANUAL_EDIT_PROMPT }
 
 const DOUBAO_PARTITION = 'persist:watermark-lab-doubao';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'app-icon.png');
+const APP_DISPLAY_NAME = '水印清理工作台';
+// Dock 悬停与系统各处显示应用名（开发模式下默认显示 Electron）
+app.setName(APP_DISPLAY_NAME);
+// setName 会改变 userData 默认位置；若旧目录已存在则钉回去，避免设置、队列与豆包登录态丢失
+const LEGACY_USER_DATA = path.join(app.getPath('appData'), 'doubao-watermark-lab');
+try {
+  if (fsSync.existsSync(LEGACY_USER_DATA)) app.setPath('userData', LEGACY_USER_DATA);
+} catch { /* 保留默认路径 */ }
 const AUTOMATION_SAFETY_VERSION = 1;
 const CROP_STRATEGY_VERSION = 4;
 const SUPPORTED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.avif', '.heic', '.heif']);
@@ -59,6 +68,7 @@ let mainWindow;
 let doubaoWindow;
 let previewWindow;
 let manualWindow;
+let advancedWindow;
 let loginTimer;
 let loginFlowActive = false;
 // 批处理与涂抹重绘都支持并发：activeBatchCount 跟踪进行中的任务数，每个批次持有独立取消标记；
@@ -852,7 +862,7 @@ async function runManualEdit(payload = {}) {
   }
 }
 
-async function getImagePreviewData(targetPath) {
+async function getImagePreviewData(targetPath, maxSize) {
   if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) {
     throw new Error('预览路径无效');
   }
@@ -864,7 +874,10 @@ async function getImagePreviewData(targetPath) {
   const image = nativeImage.createFromPath(targetPath);
   if (image.isEmpty()) throw new Error('无法读取处理结果');
   const { width, height } = image.getSize();
-  const scale = Math.min(1, 1800 / width, 1200 / height);
+  // maxSize 不传时按预览大图处理（2560），传了则夹在 64-2560（如悬停气泡的 480）
+  const requested = Math.round(Number(maxSize)) || 0;
+  const limit = requested ? Math.min(2560, Math.max(64, requested)) : 2560;
+  const scale = Math.min(1, limit / width, limit / height);
   const preview = scale < 1
     ? image.resize({
       width: Math.max(1, Math.round(width * scale)),
@@ -973,8 +986,55 @@ async function openManualEditWindow(payload = {}) {
   return true;
 }
 
+function openAdvancedSettingsWindow() {
+  if (advancedWindow && !advancedWindow.isDestroyed()) {
+    if (advancedWindow.isMinimized()) advancedWindow.restore();
+    advancedWindow.show();
+    advancedWindow.focus();
+    return true;
+  }
+
+  advancedWindow = new BrowserWindow({
+    width: 620,
+    height: 680,
+    minWidth: 540,
+    minHeight: 620,
+    backgroundColor: '#f5f4ef',
+    icon: APP_ICON_PATH,
+    title: '高级处理设置',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 18 } : undefined,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'advanced-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  advancedWindow.loadFile(path.join(__dirname, 'renderer', 'advanced-window.html'));
+  advancedWindow.once('ready-to-show', () => {
+    if (!advancedWindow || advancedWindow.isDestroyed()) return;
+    advancedWindow.show();
+    advancedWindow.focus();
+  });
+  advancedWindow.on('closed', () => {
+    advancedWindow = null;
+  });
+  return true;
+}
+
 function registerIpc() {
   ipcMain.handle('settings:get', loadSettings);
+  ipcMain.handle('advanced:open', () => openAdvancedSettingsWindow());
+  ipcMain.handle('advanced:save', async (_event, value) => {
+    const settings = await saveSettings(value);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('settings:updated', settings);
+    return settings;
+  });
+  ipcMain.on('advanced:close', () => {
+    if (advancedWindow && !advancedWindow.isDestroyed()) advancedWindow.close();
+  });
   ipcMain.handle('settings:save', (_event, value) => saveSettings(value));
   ipcMain.handle('queue:get', loadQueueRecords);
   ipcMain.handle('queue:save', (_event, records) => saveQueueRecords(records));
@@ -990,7 +1050,7 @@ function registerIpc() {
     return result.canceled ? [] : validateImagePaths(result.filePaths);
   });
   ipcMain.handle('files:validate', (_event, paths) => validateImagePaths(paths));
-  ipcMain.handle('image:preview', (_event, targetPath) => getImagePreviewData(targetPath));
+  ipcMain.handle('image:preview', (_event, targetPath, maxSize) => getImagePreviewData(targetPath, maxSize));
   ipcMain.handle('image:open-preview', (_event, targetPath) => openImagePreviewWindow(targetPath));
   ipcMain.handle('manual:open', (_event, payload) => openManualEditWindow(payload));
   ipcMain.on('manual:submit', (_event, payload) => {
@@ -1025,7 +1085,49 @@ function registerIpc() {
   });
 }
 
+// 去掉系统菜单栏后，macOS 的文本编辑快捷键（⌘C/⌘V 等）会随菜单一起消失，这里按窗口补回
+const MENULESS_EDIT_ACTIONS = new Map([
+  ['c', 'copy'],
+  ['v', 'paste'],
+  ['x', 'cut'],
+  ['a', 'selectAll']
+]);
+
+function registerEditShortcuts() {
+  if (process.platform !== 'darwin') return;
+  app.on('web-contents-created', (_event, contents) => {
+    if (contents.getType() !== 'window') return;
+    contents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || !input.meta || input.control || input.alt) return;
+      const key = (input.key || '').toLowerCase();
+      if (key === 'z') {
+        event.preventDefault();
+        if (input.shift) contents.redo();
+        else contents.undo();
+        return;
+      }
+      if (key === 'w') {
+        event.preventDefault();
+        BrowserWindow.fromWebContents(contents)?.close();
+        return;
+      }
+      if (key === 'q') {
+        event.preventDefault();
+        app.quit();
+        return;
+      }
+      const action = MENULESS_EDIT_ACTIONS.get(key);
+      if (!action) return;
+      event.preventDefault();
+      contents[action]();
+    });
+  });
+}
+
 app.whenReady().then(async () => {
+  // 应用不使用系统菜单栏（macOS 顶部菜单与 Windows 窗口菜单一并移除）
+  Menu.setApplicationMenu(null);
+  registerEditShortcuts();
   const appIcon = nativeImage.createFromPath(APP_ICON_PATH);
   if (process.platform === 'darwin' && !appIcon.isEmpty()) app.dock.setIcon(appIcon);
   configureDoubaoSession();

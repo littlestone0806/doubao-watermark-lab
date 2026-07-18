@@ -1,6 +1,6 @@
 {
   "name": "doubao-watermark-lab",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "基于 Electron 和豆包网页版的批量图片去水印工作台",
   "main": "src/main.js",
   "author": "Watermark Lab",
@@ -8,8 +8,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "check": "node --check src/main.js && node --check src/preload.js && node --check src/preview-preload.js && node --check src/manual-preload.js && node --check src/doubao-automation.js && node --check src/image-pipeline.js && node --check src/renderer/app.js && node --check src/renderer/preview-window.js && node --check src/renderer/manual-window.js",
+    "check": "node --check src/main.js && node --check src/preload.js && node --check src/preview-preload.js && node --check src/manual-preload.js && node --check src/advanced-preload.js && node --check src/doubao-automation.js && node --check src/image-pipeline.js && node --check src/renderer/app.js && node --check src/renderer/preview-window.js && node --check src/renderer/manual-window.js && node --check src/renderer/advanced-window.js",
     "test": "node --test \"test/*.test.js\"",
+    "postinstall": "node scripts/fix-electron-name.cjs",
     "dist": "electron-builder"
   },
   "devDependencies": {

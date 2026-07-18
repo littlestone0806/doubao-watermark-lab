@@ -12,7 +12,13 @@ contextBridge.exposeInMainWorld('watermarkLab', {
   getLoginStatus: () => ipcRenderer.invoke('login:status'),
   selectImages: () => ipcRenderer.invoke('files:select'),
   validatePaths: (paths) => ipcRenderer.invoke('files:validate', paths),
-  getImagePreview: (targetPath) => ipcRenderer.invoke('image:preview', targetPath),
+  getImagePreview: (targetPath, maxSize) => ipcRenderer.invoke('image:preview', targetPath, maxSize),
+  openAdvancedSettings: () => ipcRenderer.invoke('advanced:open'),
+  onSettingsUpdated: (callback) => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('settings:updated', listener);
+    return () => ipcRenderer.removeListener('settings:updated', listener);
+  },
   openPreviewWindow: (targetPath) => ipcRenderer.invoke('image:open-preview', targetPath),
   openManualWindow: (payload) => ipcRenderer.invoke('manual:open', payload),
   pathForFile: (file) => webUtils.getPathForFile(file),

@@ -319,7 +319,9 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .queue-item.is-complete { border-color: rgba(var(--accent-rgb), .22); }
 .queue-item.is-error { border-color: rgba(168, 73, 63, .28); background: var(--danger-soft); }
 .queue-item.is-unchecked .queue-thumb, .queue-item.is-unchecked .queue-copy { opacity: .42; }
-.queue-thumb { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: var(--line-soft); }
+.queue-thumb { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; background: var(--line-soft); cursor: zoom-in; }
+.thumb-popover { position: fixed; z-index: 45; padding: 8px; border: 1px solid var(--glass-border); border-radius: 13px; background: var(--surface-strong); box-shadow: 0 18px 46px rgba(0,0,0,.2), inset 0 1px 0 var(--glass-highlight); backdrop-filter: blur(26px) saturate(150%); -webkit-backdrop-filter: blur(26px) saturate(150%); pointer-events: none; }
+.thumb-popover img { display: block; max-width: 360px; max-height: 360px; border-radius: 8px; }
 .queue-copy { min-width: 0; }
 .queue-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 5px; font-size: 12px; font-weight: 700; }
 .queue-meta { color: var(--muted); font-size: 9px; }
@@ -409,7 +411,7 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .settings-actions { flex: none; display: flex; align-items: center; gap: 9px; padding: 13px 20px 16px; border-top: 1px solid var(--line-soft); }
 .settings-actions .button.ghost { flex: none; padding-inline: 11px; }
 .settings-actions .button.primary { min-width: 0; flex: 1; }
-.settings-actions .button.danger { flex: none; }
+.settings-actions .button.danger { flex: 1; }
 .appearance-popover-anchor { position: relative; }
 .appearance-toggle { position: relative; }
 .appearance-toggle::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 8px; height: 8px; border: 1.5px solid var(--surface-strong); border-radius: 50%; background: var(--accent); }
@@ -432,9 +434,7 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .button.danger:hover { filter: brightness(.96); }
 .is-hidden { display: none !important; }
 
-.preview-modal,
-.advanced-modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 34px; }
-.advanced-modal { z-index: 55; }
+.preview-modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 34px; }
 .preview-backdrop { position: absolute; inset: 0; background: rgba(7, 12, 10, .66); backdrop-filter: blur(13px) saturate(130%); -webkit-backdrop-filter: blur(13px) saturate(130%); animation: preview-fade .18s ease; }
 .preview-dialog { position: relative; width: min(1040px, calc(100vw - 68px)); height: min(760px, calc(100vh - 68px)); display: grid; grid-template-rows: 62px minmax(0, 1fr); overflow: hidden; border: 1px solid rgba(255,255,255,.19); border-radius: 19px; background: rgba(16, 23, 20, .82); box-shadow: 0 30px 90px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.12); backdrop-filter: blur(28px); animation: preview-in .2s ease; }
 .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 14px 0 21px; border-bottom: 1px solid var(--line-soft); background: var(--surface-strong); color: var(--ink); }
@@ -459,7 +459,6 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 @keyframes preview-fade { from { opacity: 0; } }
 @keyframes preview-in { from { opacity: 0; transform: translateY(8px) scale(.99); } }
 
-.advanced-dialog { position: relative; width: min(680px, calc(100vw - 68px)); max-height: calc(100vh - 68px); display: grid; grid-template-rows: 66px minmax(0, 1fr) 66px; overflow: hidden; border: 1px solid var(--glass-border); border-radius: 19px; background: var(--surface-strong); box-shadow: 0 30px 90px rgba(0,0,0,.32), inset 0 1px 0 var(--glass-highlight); backdrop-filter: blur(30px) saturate(145%); animation: preview-in .2s ease; }
 .advanced-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px 0 22px; border-bottom: 1px solid var(--line-soft); background: var(--surface-muted); }
 .advanced-head strong { display: block; font-size: 14px; }
 .advanced-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }

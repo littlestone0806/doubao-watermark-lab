@@ -56,21 +56,9 @@ const elements = {
   previewZoomReset: document.querySelector('#previewZoomReset'),
   previewZoomIn: document.querySelector('#previewZoomIn'),
   previewZoomValue: document.querySelector('#previewZoomValue'),
-  advancedSettingsModal: document.querySelector('#advancedSettingsModal'),
-  advancedSettingsBackdrop: document.querySelector('#advancedSettingsBackdrop'),
-  advancedSettingsClose: document.querySelector('#advancedSettingsClose'),
-  advancedSettingsCancel: document.querySelector('#advancedSettingsCancel'),
-  advancedSettingsSave: document.querySelector('#advancedSettingsSave'),
-  advancedPrompt: document.querySelector('#advancedPrompt'),
-  advancedPromptCount: document.querySelector('#advancedPromptCount'),
-  advancedManualPrompt: document.querySelector('#advancedManualPrompt'),
-  advancedManualPromptCount: document.querySelector('#advancedManualPromptCount'),
-  advancedCropEdge: document.querySelector('#advancedCropEdge'),
-  advancedCropPercent: document.querySelector('#advancedCropPercent'),
-  advancedCropPercentOutput: document.querySelector('#advancedCropPercentOutput'),
-  advancedCompensation: document.querySelector('#advancedCompensation'),
-  advancedCompensationOutput: document.querySelector('#advancedCompensationOutput'),
-  toastRegion: document.querySelector('#toastRegion')
+  toastRegion: document.querySelector('#toastRegion'),
+  thumbPopover: document.querySelector('#thumbPopover'),
+  thumbPopoverImage: document.querySelector('#thumbPopoverImage')
 };
 
 function formatBytes(bytes) {
@@ -174,54 +162,6 @@ function applyAppearance(settings) {
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-pressed', String(active));
   });
-}
-
-function closeAdvancedSettings() {
-  if (elements.advancedSettingsModal.contains(document.activeElement)) {
-    elements.advancedSettingsButton.focus();
-  }
-  elements.advancedSettingsModal.classList.add('is-hidden');
-  elements.advancedSettingsModal.setAttribute('aria-hidden', 'true');
-}
-
-function openAdvancedSettings() {
-  elements.advancedPrompt.value = state.settings.prompt;
-  elements.advancedPromptCount.value = elements.advancedPrompt.value.length;
-  elements.advancedPromptCount.textContent = elements.advancedPrompt.value.length;
-  elements.advancedManualPrompt.value = state.settings.manualEditPrompt || '';
-  elements.advancedManualPromptCount.value = elements.advancedManualPrompt.value.length;
-  elements.advancedManualPromptCount.textContent = elements.advancedManualPrompt.value.length;
-  elements.advancedCropEdge.value = state.settings.cropEdge;
-  elements.advancedCropPercent.value = state.settings.cropPercent;
-  elements.advancedCropPercentOutput.value = formatPercent(state.settings.cropPercent);
-  elements.advancedCropPercentOutput.textContent = formatPercent(state.settings.cropPercent);
-  elements.advancedCompensation.value = state.settings.cropCompensationPercent;
-  elements.advancedCompensationOutput.value = formatPercent(state.settings.cropCompensationPercent);
-  elements.advancedCompensationOutput.textContent = formatPercent(state.settings.cropCompensationPercent);
-  elements.advancedSettingsModal.classList.remove('is-hidden');
-  elements.advancedSettingsModal.setAttribute('aria-hidden', 'false');
-  elements.advancedPrompt.focus();
-}
-
-async function saveAdvancedSettings() {
-  elements.advancedSettingsSave.disabled = true;
-  try {
-    state.settings = await api.saveSettings({
-      ...state.settings,
-      prompt: elements.advancedPrompt.value,
-      manualEditPrompt: elements.advancedManualPrompt.value,
-      cropEdge: elements.advancedCropEdge.value,
-      cropPercent: Number(elements.advancedCropPercent.value),
-      cropCompensationPercent: Number(elements.advancedCompensation.value)
-    });
-    applySettings(state.settings);
-    closeAdvancedSettings();
-    toast('高级处理设置已保存');
-  } catch (error) {
-    toast(error.message || String(error), 'error');
-  } finally {
-    elements.advancedSettingsSave.disabled = false;
-  }
 }
 
 const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
@@ -412,6 +352,64 @@ function syncActionState() {
   elements.queueListToolbar.classList.toggle('is-hidden', state.files.length === 0);
 }
 
+// 悬停原图缩略图时展示的放大气泡；预览图按路径缓存，最多保留 30 张
+const thumbPreviewCache = new Map();
+let thumbHoverToken = 0;
+let thumbHoverTimer = 0;
+
+function positionThumbPopover(anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const pop = elements.thumbPopover;
+  const size = pop.getBoundingClientRect();
+  let left = rect.right + 10;
+  if (left + size.width > window.innerWidth - 12) left = rect.left - size.width - 10;
+  if (left < 12) left = Math.max(12, Math.min(rect.right + 10, window.innerWidth - size.width - 12));
+  const top = Math.max(12, Math.min(rect.top + rect.height / 2 - size.height / 2, window.innerHeight - size.height - 12));
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+}
+
+function hideThumbPopover() {
+  thumbHoverToken += 1;
+  clearTimeout(thumbHoverTimer);
+  elements.thumbPopover.classList.add('is-hidden');
+}
+
+async function showThumbPopover(file, anchor) {
+  const token = ++thumbHoverToken;
+  const reveal = (dataUrl) => {
+    if (token !== thumbHoverToken) return;
+    elements.thumbPopoverImage.onload = () => {
+      if (token === thumbHoverToken) positionThumbPopover(anchor);
+    };
+    elements.thumbPopoverImage.src = dataUrl;
+    elements.thumbPopover.classList.remove('is-hidden');
+    positionThumbPopover(anchor);
+  };
+  const cached = thumbPreviewCache.get(file.path);
+  if (cached) {
+    reveal(cached);
+    return;
+  }
+  try {
+    const preview = await api.getImagePreview(file.path, 480);
+    if (thumbPreviewCache.size >= 30) thumbPreviewCache.delete(thumbPreviewCache.keys().next().value);
+    thumbPreviewCache.set(file.path, preview.dataUrl);
+    reveal(preview.dataUrl);
+  } catch {
+    // 原图缺失或不可读时不显示气泡
+  }
+}
+
+function bindThumbPopover(image, file) {
+  image.addEventListener('mouseenter', () => {
+    clearTimeout(thumbHoverTimer);
+    thumbHoverTimer = setTimeout(() => showThumbPopover(file, image), 140);
+  });
+  image.addEventListener('mouseleave', hideThumbPopover);
+}
+elements.queueList.addEventListener('scroll', hideThumbPopover);
+
 function makeQueueItem(file, index) {
   const row = document.createElement('article');
   row.className = `queue-item ${file.status ? `is-${file.status}` : ''}${file.selected === false ? ' is-unchecked' : ''}`;
@@ -434,6 +432,7 @@ function makeQueueItem(file, index) {
   image.className = 'queue-thumb';
   image.src = file.thumbnail;
   image.alt = '';
+  bindThumbPopover(image, file);
 
   const copy = document.createElement('div');
   copy.className = 'queue-copy';
@@ -516,6 +515,7 @@ function makeQueueItem(file, index) {
 }
 
 function renderQueue() {
+  hideThumbPopover();
   elements.queueList.replaceChildren(...state.files.map(makeQueueItem));
   syncActionState();
   scheduleQueueSave();
@@ -753,28 +753,10 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !elements.appearanceColors.classList.contains('is-hidden')) setAppearancePopover(false);
 });
-elements.advancedSettingsButton.addEventListener('click', openAdvancedSettings);
-elements.advancedSettingsBackdrop.addEventListener('click', closeAdvancedSettings);
-elements.advancedSettingsClose.addEventListener('click', closeAdvancedSettings);
-elements.advancedSettingsCancel.addEventListener('click', closeAdvancedSettings);
-elements.advancedSettingsSave.addEventListener('click', saveAdvancedSettings);
-elements.advancedPrompt.addEventListener('input', () => {
-  elements.advancedPromptCount.value = elements.advancedPrompt.value.length;
-  elements.advancedPromptCount.textContent = elements.advancedPrompt.value.length;
-});
-elements.advancedManualPrompt.addEventListener('input', () => {
-  elements.advancedManualPromptCount.value = elements.advancedManualPrompt.value.length;
-  elements.advancedManualPromptCount.textContent = elements.advancedManualPrompt.value.length;
-});
-elements.advancedCropPercent.addEventListener('input', () => {
-  const value = formatPercent(elements.advancedCropPercent.value);
-  elements.advancedCropPercentOutput.value = value;
-  elements.advancedCropPercentOutput.textContent = value;
-});
-elements.advancedCompensation.addEventListener('input', () => {
-  const value = formatPercent(elements.advancedCompensation.value);
-  elements.advancedCompensationOutput.value = value;
-  elements.advancedCompensationOutput.textContent = value;
+elements.advancedSettingsButton.addEventListener('click', () => api.openAdvancedSettings());
+api.onSettingsUpdated((settings) => {
+  applySettings(settings);
+  toast('高级处理设置已保存');
 });
 
 elements.outputButton.addEventListener('click', async () => {
@@ -850,8 +832,7 @@ document.addEventListener('keydown', (event) => {
     }
   }
   if (event.key === 'Escape') {
-    if (!elements.advancedSettingsModal.classList.contains('is-hidden')) closeAdvancedSettings();
-    else if (previewOpen) closePreview();
+    if (previewOpen) closePreview();
   }
 });
 elements.cancelButton.addEventListener('click', async () => {
@@ -870,12 +851,15 @@ elements.startButton.addEventListener('click', async () => {
     .filter((file) => file.selected !== false)
     .map((file) => ({ path: file.path, conversationId: file.conversationId || '' }));
   if (!items.length) return;
-  const settings = readSettings();
-  state.settings = await api.saveSettings(settings);
+  // 立即切换为运行状态（显示「停止任务」），防止启动期间被当作没点到而重复点击
+  setRunning(true);
   try {
+    const settings = readSettings();
+    state.settings = await api.saveSettings(settings);
     await api.startBatch({ paths: items, settings: state.settings });
   } catch (error) {
-    setRunning(false);
+    if (state.activeBatches.size) renderQueue();
+    else setRunning(false);
     toast(error.message || String(error), 'error');
   }
 });
