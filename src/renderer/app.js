@@ -710,6 +710,47 @@ elements.logoutButton.addEventListener('click', async () => {
   }
 });
 
+// 拖拽文件夹：递归遍历目录条目收集图片路径（readEntries 每批最多 100 条，需循环读到空）
+const DROPPED_IMAGE_PATTERN = /\.(jpe?g|png|webp|bmp|gif|avif|heic|heif)$/i;
+const MAX_DROP_PATHS = 300;
+
+function readEntryFiles(entry, paths, depth) {
+  return new Promise((resolve) => {
+    if (paths.length >= MAX_DROP_PATHS) return resolve();
+    if (entry.isFile) {
+      entry.file((file) => {
+        const filePath = api.pathForFile(file);
+        if (filePath && DROPPED_IMAGE_PATTERN.test(filePath)) paths.push(filePath);
+        resolve();
+      }, () => resolve());
+      return;
+    }
+    if (!entry.isDirectory || depth > 6) return resolve();
+    const reader = entry.createReader();
+    const readBatch = () => {
+      reader.readEntries(async (children) => {
+        if (!children.length) return resolve();
+        for (const child of children) await readEntryFiles(child, paths, depth + 1);
+        if (paths.length >= MAX_DROP_PATHS) return resolve();
+        readBatch();
+      }, () => resolve());
+    };
+    readBatch();
+  });
+}
+
+async function collectDroppedPaths(dataTransfer) {
+  const entries = [...(dataTransfer.items || [])]
+    .map((item) => (item.kind === 'file' ? item.webkitGetAsEntry?.() : null))
+    .filter(Boolean);
+  if (!entries.length) {
+    return [...dataTransfer.files].map((file) => api.pathForFile(file)).filter(Boolean);
+  }
+  const paths = [];
+  for (const entry of entries) await readEntryFiles(entry, paths, 0);
+  return paths;
+}
+
 elements.dropZone.addEventListener('click', async () => addFiles(await api.selectImages()));
 elements.dropZone.addEventListener('dragover', (event) => {
   event.preventDefault();
@@ -720,7 +761,12 @@ elements.dropZone.addEventListener('drop', async (event) => {
   event.preventDefault();
   elements.dropZone.classList.remove('is-over');
   if (state.running) return;
-  const paths = [...event.dataTransfer.files].map((file) => api.pathForFile(file)).filter(Boolean);
+  const paths = await collectDroppedPaths(event.dataTransfer);
+  if (!paths.length) {
+    toast('拖入的内容里没有可处理的图片', 'error');
+    return;
+  }
+  if (paths.length >= MAX_DROP_PATHS) toast(`图片较多，已先添加前 ${MAX_DROP_PATHS} 张`);
   addFiles(await api.validatePaths(paths));
 });
 
