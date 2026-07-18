@@ -184,7 +184,15 @@ function sanitizeQueueRecord(record = {}) {
     cropped: Boolean(record.cropped),
     cropPercent: Math.max(0, Number(record.cropPercent) || 0),
     cropEdge: record.cropEdge === 'bottom' ? 'bottom' : 'top',
-    removedUploadPadding: Boolean(record.removedUploadPadding)
+    removedUploadPadding: Boolean(record.removedUploadPadding),
+    // 质检结论随队列持久化，重启后黄标仍在
+    ...(record.qc && typeof record.qc === 'object' ? {
+      qc: {
+        verdict: ['ok', 'unchanged', 'different'].includes(record.qc.verdict) ? record.qc.verdict : 'ok',
+        changedRatio: Math.min(1, Math.max(0, Number(record.qc.changedRatio) || 0)),
+        meanDiff: Math.min(255, Math.max(0, Number(record.qc.meanDiff) || 0))
+      }
+    } : {})
   };
 }
 

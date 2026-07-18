@@ -4,3 +4,4 @@ release/
 .DS_Store
 *.log
 *.internal.md
+.qc-demo/
