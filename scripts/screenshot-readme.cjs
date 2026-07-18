@@ -95,14 +95,22 @@ async function main() {
       state.files = demo.map((file, index) => ({
         ...file,
         selected: true,
-        status: index === 0 ? 'complete' : '',
-        progress: index === 0 ? 100 : 0,
-        message: index === 0 ? '已完成，已导出' : ''
+        status: index === 0 ? 'complete' : (index === 1 ? 'active' : ''),
+        progress: index === 0 ? 100 : (index === 1 ? 46 : 0),
+        message: index === 0 ? '已完成，已导出' : (index === 1 ? '豆包正在重绘图片' : ''),
+        // 完成态带上输出路径，才能展示 重新生成 / 预览 / 涂抹重绘 按钮组
+        outputPath: index === 0 ? file.path : file.outputPath
       }));
       const output = document.querySelector('#outputPath');
       if (output) {
         output.textContent = '~/Pictures/水印清理输出';
         output.title = '~/Pictures/水印清理输出';
+      }
+      // 截图展示默认值（仅改界面显示，不写入设置）
+      const defaults = { intervalSeconds: 30, imageWaitSeconds: 60, maxConcurrentTasks: 3 };
+      for (const [id, value] of Object.entries(defaults)) {
+        const input = document.getElementById(id);
+        if (input) input.value = value;
       }
       renderQueue();
       return state.files.length;
