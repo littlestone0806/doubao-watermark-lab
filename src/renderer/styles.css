@@ -501,3 +501,40 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
   .queue-item { grid-template-columns: 20px 52px minmax(0, 1fr) 158px 28px; }
   .result-action-button { padding-inline: 7px; }
 }
+
+/* ============ Windows 清晰度优化 ============
+   毛玻璃（backdrop-filter）合成层会让 Chromium 在 Windows 上关闭次像素抗锯齿，
+   中文渲染发虚。关闭背景模糊，并把半透明面板提高到接近不透明，换回清晰渲染。 */
+body.platform-win32 * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+body.platform-win32 {
+  --surface: rgba(255, 255, 255, .94);
+  --surface-strong: rgba(255, 255, 255, .98);
+  --surface-muted: rgba(248, 251, 249, .94);
+  --topbar: color-mix(in srgb, var(--accent) 7%, rgba(241, 246, 243, .96));
+  --footer: color-mix(in srgb, var(--accent) 7%, rgba(238, 244, 241, .96));
+  --input: rgba(255, 255, 255, .96);
+}
+
+:root[data-theme="dark"] body.platform-win32 {
+  --surface: color-mix(in srgb, var(--accent) 9%, rgba(30, 40, 36, .94));
+  --surface-strong: color-mix(in srgb, var(--accent) 8%, rgba(37, 48, 43, .98));
+  --surface-muted: color-mix(in srgb, var(--accent) 8%, rgba(40, 52, 47, .94));
+  --topbar: color-mix(in srgb, var(--accent) 16%, rgba(16, 23, 20, .96));
+  --footer: color-mix(in srgb, var(--accent) 13%, rgba(16, 23, 20, .96));
+  --input: rgba(12, 18, 15, .9);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] body.platform-win32 {
+    --surface: color-mix(in srgb, var(--accent) 9%, rgba(30, 40, 36, .94));
+    --surface-strong: color-mix(in srgb, var(--accent) 8%, rgba(37, 48, 43, .98));
+    --surface-muted: color-mix(in srgb, var(--accent) 8%, rgba(40, 52, 47, .94));
+    --topbar: color-mix(in srgb, var(--accent) 16%, rgba(16, 23, 20, .96));
+    --footer: color-mix(in srgb, var(--accent) 13%, rgba(16, 23, 20, .96));
+    --input: rgba(12, 18, 15, .9);
+  }
+}

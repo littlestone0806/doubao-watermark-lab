@@ -241,6 +241,18 @@ async function loadQueueRecords() {
   return records;
 }
 
+// Windows 上毛玻璃（backdrop-filter）合成层会让 Chromium 关闭次像素抗锯齿，
+// 中文渲染发虚。给本地窗口 body 打上平台标记，样式表据此关闭背景模糊、提高面板不透明度。
+// 只用于本地页面，绝不注入豆包等外部页面。
+function applyPlatformWindowTweaks(window) {
+  if (process.platform !== 'win32') return;
+  window.webContents.on('dom-ready', () => {
+    window.webContents.executeJavaScript(
+      `document.body && document.body.classList.add('platform-win32')`
+    ).catch(() => {});
+  });
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1140,
@@ -259,8 +271,14 @@ function createMainWindow() {
     }
   });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  applyPlatformWindowTweaks(mainWindow);
   mainWindow.on('closed', () => {
     mainWindow = null;
+    // 主窗口关闭即退出整个应用：强制销毁豆包等后台窗口，避免进程残留
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.destroy();
+    }
+    app.quit();
   });
 }
 
@@ -969,6 +987,7 @@ async function openImagePreviewWindow(targetPath) {
     }
   });
   previewWindow.loadFile(path.join(__dirname, 'renderer', 'preview-window.html'));
+  applyPlatformWindowTweaks(previewWindow);
   previewWindow.once('ready-to-show', () => {
     if (!previewWindow || previewWindow.isDestroyed()) return;
     previewWindow.show();
@@ -1018,6 +1037,7 @@ async function openManualEditWindow(payload = {}) {
     }
   });
   manualWindow.loadFile(path.join(__dirname, 'renderer', 'manual-window.html'));
+  applyPlatformWindowTweaks(manualWindow);
   manualWindow.once('ready-to-show', () => {
     if (!manualWindow || manualWindow.isDestroyed()) return;
     manualWindow.show();
@@ -1059,6 +1079,7 @@ function openAdvancedSettingsWindow() {
     }
   });
   advancedWindow.loadFile(path.join(__dirname, 'renderer', 'advanced-window.html'));
+  applyPlatformWindowTweaks(advancedWindow);
   advancedWindow.once('ready-to-show', () => {
     if (!advancedWindow || advancedWindow.isDestroyed()) return;
     advancedWindow.show();
@@ -1181,7 +1202,8 @@ app.whenReady().then(async () => {
   createMainWindow();
   await broadcastLoginStatus();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    // 退出过程中不再重建窗口，避免关闭后 Dock 点击又拉起主窗口
+    if (!appQuitting && BrowserWindow.getAllWindows().length === 0) createMainWindow();
   });
 });
 
@@ -1189,7 +1211,13 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
+let appQuitting = false;
 app.on('before-quit', () => {
+  appQuitting = true;
   clearInterval(loginTimer);
   activeCancelRefs.forEach((ref) => { ref.value = true; });
+  // 强制销毁所有窗口：豆包页面可能带 beforeunload，优雅关闭可能被拦截导致进程残留
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.destroy();
+  }
 });
