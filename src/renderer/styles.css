@@ -156,14 +156,14 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
   z-index: 1;
   height: 100vh;
   display: grid;
-  grid-template-rows: 88px minmax(0, 1fr);
+  grid-template-rows: 96px minmax(0, 1fr);
 }
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 34px 14px 76px;
+  padding: 36px 34px 14px 24px;
   border-bottom: 1px solid var(--line-soft);
   background: var(--topbar);
   box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .04);
@@ -174,6 +174,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 
 .topbar button,
 .topbar .status-pill { -webkit-app-region: no-drag; }
+/* Windows 无边框：右上角留出系统最小化/最大化/关闭按钮的位置 */
+body.platform-win32 .topbar { padding-right: 152px; }
 .brand-block,
 .login-cluster { display: flex; align-items: center; }
 .brand-block { gap: 14px; }
@@ -239,8 +241,6 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .settings-panel { display: flex; flex-direction: column; }
 .panel-head { min-height: 82px; display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 14px; border-bottom: 1px solid var(--line-soft); background: linear-gradient(130deg, rgba(255,255,255,.05), transparent); }
 .panel-head.compact { min-height: 82px; }
-.panel-head > div:first-child { display: grid; grid-template-columns: 28px auto; column-gap: 10px; }
-.section-number { grid-row: 1 / 3; padding-top: 4px; color: var(--amber); font-family: Georgia, serif; font-size: 12px; font-style: italic; }
 .panel-head h2 { margin: 0 0 4px; font-size: 16px; line-height: 1.2; font-weight: 750; }
 .panel-head p { margin: 0; color: var(--muted); font-size: 11px; }
 .queue-tools { display: flex; align-items: center; gap: 12px; }
@@ -497,7 +497,7 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 }
 
 @media (max-width: 1050px) {
-  .topbar { padding-left: 70px; }
+  .topbar { padding-left: 16px; }
   .workspace { grid-template-columns: minmax(500px, 1.4fr) minmax(310px, .8fr); padding-inline: 16px; }
   .queue-item { grid-template-columns: 20px 52px minmax(0, 1fr) 158px 28px; }
   .result-action-button { padding-inline: 7px; }

@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, session } = require('electron');
 const crypto = require('node:crypto');
 const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
@@ -178,6 +178,30 @@ function updateThemedIcon(themeColor) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setIcon(themedIcon);
 }
 
+// Windows 无边框的系统按钮随主题着色：背景≈顶栏色、符号≈正文色；auto 模式下跟随系统深浅色切换
+let lastAppliedSettings = null;
+function titleBarOverlayColors(settings) {
+  const dark = settings.themeMode === 'dark'
+    || (settings.themeMode !== 'light' && nativeTheme.shouldUseDarkColors);
+  const hex = /^#[0-9a-f]{6}$/i.test(settings.themeColor || '') ? settings.themeColor : PALETTE_COLORS.forest;
+  const rgb = [1, 3, 5].map((start) => Number.parseInt(hex.slice(start, start + 2), 16));
+  const base = dark ? [16, 23, 20] : [238, 243, 240];
+  const ratio = dark ? 0.16 : 0.07;
+  const color = `#${[0, 1, 2]
+    .map((i) => Math.round(base[i] * (1 - ratio) + rgb[i] * ratio).toString(16).padStart(2, '0'))
+    .join('')}`;
+  return { color, symbolColor: dark ? '#e8efeb' : '#33423b' };
+}
+
+// 外观变化的副作用统一入口：主题图标 + Windows 标题栏按钮配色
+function applyAppearanceSideEffects(settings) {
+  lastAppliedSettings = settings;
+  updateThemedIcon(settings.themeColor);
+  if (process.platform === 'win32' && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setTitleBarOverlay({ ...titleBarOverlayColors(settings), height: 40 });
+  }
+}
+
 function sanitizeQueueRecord(record = {}) {
   const sourcePath = typeof record.path === 'string' && path.isAbsolute(record.path)
     ? path.resolve(record.path)
@@ -297,7 +321,9 @@ function createMainWindow() {
     minHeight: 630,
     backgroundColor: '#f5f4ef',
     icon: APP_ICON_PATH,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // Windows 无边框：隐藏系统标题栏，用 titleBarOverlay 保留原生最小化/最大化/关闭（含 Win11 贴靠布局）
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    ...(process.platform === 'win32' ? { titleBarOverlay: { color: '#eef3f0', symbolColor: '#33423b', height: 40 } } : {}),
     title: '水印清理工作台',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1187,7 +1213,7 @@ function registerIpc() {
   });
   ipcMain.handle('settings:save', async (_event, value) => {
     const saved = await saveSettings(value);
-    updateThemedIcon(saved.themeColor);
+    applyAppearanceSideEffects(saved);
     return saved;
   });
   ipcMain.handle('queue:get', loadQueueRecords);
@@ -1383,9 +1409,12 @@ app.whenReady().then(async () => {
   registerIpc();
   createMainWindow();
   setupAutoUpdater();
-  // 按当前主题色着色 Dock/窗口图标（窗口创建后调用，窗口图标一并生效）
+  // 按当前主题色着色 Dock/窗口图标与 Windows 标题栏按钮（窗口创建后调用一并生效）
   const settings = await loadSettings();
-  updateThemedIcon(settings.themeColor);
+  applyAppearanceSideEffects(settings);
+  nativeTheme.on('updated', () => {
+    if (lastAppliedSettings?.themeMode === 'auto') applyAppearanceSideEffects(lastAppliedSettings);
+  });
   await broadcastLoginStatus();
   app.on('activate', () => {
     // 退出过程中不再重建窗口，避免关闭后 Dock 点击又拉起主窗口
