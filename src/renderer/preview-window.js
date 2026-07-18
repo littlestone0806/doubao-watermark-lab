@@ -8,8 +8,11 @@ const elements = {
   stack: document.querySelector('#compareStack'),
   image: document.querySelector('#previewImage'),
   sourceImage: document.querySelector('#sourceImage'),
+  heatmapImage: document.querySelector('#heatmapImage'),
   divider: document.querySelector('#compareDivider'),
   compareToggle: document.querySelector('#compareToggle'),
+  diffToggle: document.querySelector('#diffToggle'),
+  diffBadge: document.querySelector('#diffBadge'),
   loading: document.querySelector('#previewLoading'),
   zoomOut: document.querySelector('#zoomOut'),
   zoomReset: document.querySelector('#zoomReset'),
@@ -26,6 +29,11 @@ let comparing = false;
 let split = 50;
 let splitPointer = null;
 let sourceAvailable = false;
+// 差异热力模式状态
+let diffing = false;
+let diffAvailable = false;
+let qcStats = null;
+let baseMeta = '';
 
 function clampPan() {
   const imageWidth = elements.image.clientWidth * zoom;
@@ -99,19 +107,34 @@ function applySplit() {
 
 function setCompare(enabled) {
   if (enabled && !sourceAvailable) return;
+  if (enabled) setDiff(false);
   comparing = enabled;
   elements.compareToggle.classList.toggle('is-active', comparing);
   elements.sourceImage.classList.toggle('is-hidden', !comparing);
   elements.divider.classList.toggle('is-hidden', !comparing);
-  for (const badge of elements.stack.querySelectorAll('.compare-badge')) {
+  for (const badge of elements.stack.querySelectorAll('.compare-badge:not(.badge-diff)')) {
     badge.classList.toggle('is-hidden', !comparing);
   }
+}
+
+function setDiff(enabled) {
+  if (enabled && !diffAvailable) return;
+  if (enabled) setCompare(false);
+  diffing = enabled;
+  elements.diffToggle.classList.toggle('is-active', diffing);
+  elements.heatmapImage.classList.toggle('is-hidden', !diffing);
+  elements.diffBadge.classList.toggle('is-hidden', !diffing);
+  // 差异模式下副标题显示质检统计
+  elements.meta.textContent = diffing && qcStats
+    ? `${baseMeta} · 变化像素 ${(qcStats.changedRatio * 100).toFixed(1)}%`
+    : baseMeta;
 }
 
 window.previewBridge.onLoad((preview) => {
   document.title = `预览 · ${preview.name}`;
   elements.title.textContent = preview.name;
-  elements.meta.textContent = `${preview.width} × ${preview.height}`;
+  baseMeta = `${preview.width} × ${preview.height}`;
+  elements.meta.textContent = baseMeta;
   elements.loading.classList.remove('is-hidden');
   elements.stack.classList.add('is-hidden');
   // 原图数据随结果一起下发（可能为空：原图被移动或删除时不可对比）
@@ -120,6 +143,17 @@ window.previewBridge.onLoad((preview) => {
   split = 50;
   applySplit();
   elements.compareToggle.classList.toggle('is-hidden', !sourceAvailable);
+  // 质检数据：有热力图时开放"差异热力"开关，异常结论给按钮加警示色
+  qcStats = preview.qc || null;
+  diffAvailable = Boolean(preview.qc?.heatmap?.dataUrl);
+  setDiff(false);
+  elements.diffToggle.classList.toggle('is-hidden', !diffAvailable);
+  elements.diffToggle.classList.toggle('is-warning', diffAvailable && preview.qc.verdict !== 'ok');
+  if (diffAvailable) {
+    elements.heatmapImage.src = preview.qc.heatmap.dataUrl;
+  } else {
+    elements.heatmapImage.removeAttribute('src');
+  }
   elements.image.onload = () => {
     elements.loading.classList.add('is-hidden');
     elements.stack.classList.remove('is-hidden');
@@ -136,6 +170,7 @@ window.previewBridge.onLoad((preview) => {
 });
 
 elements.compareToggle.addEventListener('click', () => setCompare(!comparing));
+elements.diffToggle.addEventListener('click', () => setDiff(!diffing));
 
 // 拖动分割线调整原图/结果占比
 elements.divider.addEventListener('pointerdown', (event) => {

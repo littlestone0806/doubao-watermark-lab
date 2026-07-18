@@ -444,6 +444,16 @@ function makeQueueItem(file, index) {
   meta.className = 'queue-meta';
   meta.textContent = `${file.width} × ${file.height} · ${formatBytes(file.bytes)}`;
   copy.append(name, meta);
+  if (file.status === 'complete' && file.qc && file.qc.verdict !== 'ok') {
+    const flag = document.createElement('span');
+    flag.className = 'qc-flag';
+    const percent = (file.qc.changedRatio * 100).toFixed(1);
+    flag.textContent = file.qc.verdict === 'unchanged' ? '质检：疑似未处理' : '质检：差异过大';
+    flag.title = file.qc.verdict === 'unchanged'
+      ? `与原图相比变化像素仅 ${percent}%，疑似没有实际处理；点击"预览"查看差异热力图`
+      : `与原图相比变化像素达 ${percent}%，差异异常大；点击"预览"查看差异热力图`;
+    copy.append(flag);
+  }
 
   const status = document.createElement('div');
   status.className = 'job-status';
@@ -600,7 +610,8 @@ function handleBatchEvent(event) {
     updateFile(event.path, {
       status: 'active',
       message: event.message,
-      progress: progressForMessage(event.message, current)
+      progress: progressForMessage(event.message, current),
+      qc: null
     });
   }
   if (event.type === 'verification-required') {
@@ -629,6 +640,23 @@ function handleBatchEvent(event) {
       });
       renderQueue();
       persistQueueNow().catch((error) => console.error('保存完成记录失败', error));
+    }
+  }
+  if (event.type === 'job-qc' && event.qc) {
+    const source = state.files.find((file) => file.path === event.path);
+    if (source) {
+      source.qc = {
+        verdict: event.qc.verdict,
+        changedRatio: event.qc.changedRatio,
+        meanDiff: event.qc.meanDiff
+      };
+      renderQueue();
+      persistQueueNow().catch((error) => console.error('保存质检记录失败', error));
+      if (event.qc.verdict === 'unchanged') {
+        toast(`${event.name}：质检提示结果与原图几乎无差异，建议预览确认或重新生成`, 'error');
+      } else if (event.qc.verdict === 'different') {
+        toast(`${event.name}：质检提示结果与原图差异过大，请预览确认`, 'error');
+      }
     }
   }
   if (event.type === 'job-error') {

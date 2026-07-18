@@ -325,6 +325,7 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .queue-copy { min-width: 0; }
 .queue-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 5px; font-size: 12px; font-weight: 700; }
 .queue-meta { color: var(--muted); font-size: 9px; }
+.qc-flag { display: inline-block; margin-top: 4px; padding: 2px 7px; border-radius: 999px; background: rgba(217, 119, 6, .14); color: #d97706; font-size: 9px; font-weight: 700; }
 .job-status { min-width: 0; text-align: right; }
 .job-status strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
 .job-status span { display: block; margin-top: 4px; color: var(--faint); font-size: 9px; }

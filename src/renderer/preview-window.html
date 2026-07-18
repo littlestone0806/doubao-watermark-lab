@@ -15,6 +15,7 @@
           <span id="previewMeta">正在载入…</span>
         </div>
         <div class="preview-toolbar-actions">
+          <button id="diffToggle" class="compare-toggle is-hidden" type="button" title="查看质检差异热力图：红色区域为与原图的差异处">差异热力</button>
           <button id="compareToggle" class="compare-toggle is-hidden" type="button" title="与原图对比">对比原图</button>
           <div class="preview-zoom-controls" aria-label="预览缩放">
             <button id="zoomOut" type="button" title="缩小（⌘-）" aria-label="缩小">−</button>
@@ -28,8 +29,10 @@
         <div id="compareStack" class="compare-stack is-hidden">
           <img id="previewImage" alt="处理结果预览" draggable="false">
           <img id="sourceImage" class="compare-source is-hidden" alt="原图" draggable="false">
+          <img id="heatmapImage" class="heatmap-overlay is-hidden" alt="质检差异热力图" draggable="false">
           <span class="compare-badge badge-source is-hidden">原图</span>
           <span class="compare-badge badge-result is-hidden">结果</span>
+          <span id="diffBadge" class="compare-badge badge-diff is-hidden">差异热力</span>
           <div id="compareDivider" class="compare-divider is-hidden" title="拖动分割线对比"><span></span></div>
         </div>
         <div class="preview-help">⌘ + / − 缩放 · ⌘ 0 还原 · 放大后拖拽查看</div>

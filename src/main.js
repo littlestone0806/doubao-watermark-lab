@@ -1,9 +1,11 @@
 'use strict';
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, session } = require('electron');
+const crypto = require('node:crypto');
 const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { computeDiffStats, verdictForStats, buildHeatmap } = require('./qc-check');
 const { DoubaoAutomation, DOUBAO_CHAT_URL } = require('./doubao-automation');
 const {
   downloadBestImage,
@@ -784,6 +786,10 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
       };
       results.push(result);
       batchEvent({ type: 'job-complete', ...result });
+      // 自动质检：不阻塞队列，对比完成后单独推送结论（失败静默忽略，不影响任务本身）
+      runQcCheck(sourcePath, saved.path)
+        .then((qc) => batchEvent({ type: 'job-qc', ...jobBase, outputPath: saved.path, qc }))
+        .catch(() => {});
     } catch (error) {
       if (error.code === 'CANCELLED' || cancelRef.value) return;
       if (error.code === 'VERIFICATION_INTERRUPTED') return 'retry';
@@ -926,6 +932,33 @@ async function runManualEdit(payload = {}) {
   }
 }
 
+// 自动质检：对比原图与处理结果，识别"疑似未处理 / 差异过大"并生成差异热力图。
+// 无额外图像依赖：用 nativeImage 解码，统一缩到相同尺寸（≤512）后逐像素比较；
+// 热力图按输出路径命名（同名覆盖，不会越积越多），存于 userData/qc。
+async function runQcCheck(sourcePath, outputPath) {
+  const sourceImage = nativeImage.createFromPath(sourcePath);
+  const outputImage = nativeImage.createFromPath(outputPath);
+  if (sourceImage.isEmpty() || outputImage.isEmpty()) throw new Error('质检图片读取失败');
+  const sourceSize = sourceImage.getSize();
+  const outputSize = outputImage.getSize();
+  const scale = Math.min(1, 512 / Math.max(sourceSize.width, sourceSize.height, outputSize.width, outputSize.height));
+  const width = Math.max(1, Math.round(Math.min(sourceSize.width, outputSize.width) * scale));
+  const height = Math.max(1, Math.round(Math.min(sourceSize.height, outputSize.height) * scale));
+  // toBitmap 为 BGRA 排列：红色通道在下标 2
+  const sourcePixels = sourceImage.resize({ width, height, quality: 'good' }).toBitmap();
+  const outputPixels = outputImage.resize({ width, height, quality: 'good' }).toBitmap();
+  const stats = computeDiffStats(sourcePixels, outputPixels);
+  const verdict = verdictForStats(stats);
+  const heatmapPixels = buildHeatmap(sourcePixels, outputPixels, width, height, 2);
+  const heatmap = nativeImage.createFromBitmap(heatmapPixels, { width, height });
+  const directory = path.join(app.getPath('userData'), 'qc');
+  await fs.mkdir(directory, { recursive: true });
+  const key = crypto.createHash('sha1').update(outputPath).digest('hex').slice(0, 12);
+  const heatmapPath = path.join(directory, `${key}.png`);
+  await fs.writeFile(heatmapPath, heatmap.toPNG());
+  return { verdict, ...stats, heatmapPath };
+}
+
 async function getImagePreviewData(targetPath, maxSize) {
   if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) {
     throw new Error('预览路径无效');
@@ -964,6 +997,17 @@ async function openImagePreviewWindow(payload) {
   const preview = await getImagePreviewData(targetPath);
   // 原图可能已被移动或删除，加载失败时不影响结果预览
   preview.source = await getImagePreviewData(sourcePath).catch(() => null);
+  // 有原图时附带质检差异热力图（质检失败不影响预览）
+  preview.qc = sourcePath
+    ? await runQcCheck(sourcePath, targetPath)
+        .then(async (qc) => ({
+          verdict: qc.verdict,
+          changedRatio: qc.changedRatio,
+          meanDiff: qc.meanDiff,
+          heatmap: await getImagePreviewData(qc.heatmapPath).catch(() => null)
+        }))
+        .catch(() => null)
+    : null;
   if (previewWindow && !previewWindow.isDestroyed()) {
     previewWindow.setTitle(`预览 · ${preview.name}`);
     previewWindow.webContents.send('preview:load', preview);
