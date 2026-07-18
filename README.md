@@ -28,9 +28,17 @@
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| macOS（Apple 芯片） | `*-mac-arm64.dmg` / `.zip` | 未签名，首次打开请右键 → 打开 |
+| macOS（Apple 芯片） | `*-mac-arm64.dmg` / `.zip` | 未签名，打开提示"已损坏"时在终端执行 `xattr -cr /Applications/水印清理工作台.app` 即可（见下方说明） |
 | Windows x64 | `*-win-x64-setup.exe` | 安装版，SmartScreen 提示时点"更多信息 → 仍要运行" |
 | Windows x64 | `*-win-x64-portable.exe` | 便携版，免安装直接运行 |
+
+**macOS "已损坏"提示说明**：应用未做 Apple 签名，浏览器下载的文件会被 Gatekeeper 加上隔离属性，新版 macOS 对此直接报"已损坏"（文件本身并没有坏）。把应用拖入「应用程序」文件夹后，在终端执行一次：
+
+```bash
+xattr -cr /Applications/水印清理工作台.app
+```
+
+之后即可正常双击打开（也可以右键 → 打开）。该命令仅移除这个应用的下载隔离标记，不影响系统其他设置。
 
 首次使用：
 
