@@ -66,24 +66,6 @@ npx electron-builder --win --x64  # 在 macOS 上交叉打包 Windows x64
 
 产物输出到 `dist/`。未配置代码签名证书时会跳过签名（不影响使用，首次打开按上表提示操作）。
 
-## 发版流程
-
-1. 修改 `package.json` 版本号，提交全部改动。
-2. 分步打包（一次跑完容易超时）：
-   ```bash
-   npx electron-builder --mac              # macOS arm64：dmg + zip
-   npx electron-builder --win --x64 --arm64 # Windows x64 + arm64：setup + portable
-   ```
-3. 归档产物：在 `dist/` 下按版本号新建文件夹（如 `dist/1.0.4/`），移入全部中文名产物、`latest*.yml` 与 `builder-debug.yml`；删除合并架构的 `*-win-setup.exe` / `*-win-portable.exe` 及其 blockmap、`*-unpacked` 中间目录。
-4. 复制 6 个安装包为 ASCII 文件名 `doubao-watermark-lab-<版本>-<平台>`（mac dmg/zip + win x64/arm64 setup/portable），作为 Release 附件。
-5. 打 tag 并推送，然后创建 Release：
-   - **Release 标题固定用 `水印清理工作台 x.y.z`**（与历史版本一致，不要用 `vx.y.z`）
-   - 正文格式：## 更新内容 → ## 下载说明（含未签名提示）
-   ```bash
-   git tag vx.y.z && git push origin main && git push origin vx.y.z
-   gh release create vx.y.z --title "水印清理工作台 x.y.z" --notes "..." dist/x.y.z/doubao-watermark-lab-*
-   ```
-
 ## 测试
 
 ```bash
