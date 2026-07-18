@@ -1198,8 +1198,68 @@ function registerEditShortcuts() {
 
 // 自动更新：启动后静默检查 GitHub Releases，有新版时后台下载，下载完成后询问是否重启安装。
 // 未签名的 macOS 包无法自动安装更新（Squirrel 限制），检查/下载会静默失败，用户仍走发布页手动下载。
+// macOS 未签名包无法使用 Squirrel 自动更新：改为 GitHub API 检查 + 引导下载 dmg（半自动更新）
+let macUpdateInProgress = false;
+async function checkMacUpdate() {
+  const { newerVersionFromRelease, pickReleaseAsset } = require('./update-check');
+  const response = await fetch('https://api.github.com/repos/littlestone0806/doubao-watermark-lab/releases/latest', {
+    headers: { 'User-Agent': 'watermark-lab-updater', Accept: 'application/vnd.github+json' }
+  });
+  if (!response.ok) return;
+  const release = await response.json();
+  const latest = newerVersionFromRelease(release, app.getVersion());
+  if (!latest || macUpdateInProgress) return;
+  macUpdateInProgress = true;
+  try {
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现新版本',
+      message: `新版本 ${latest} 已发布（当前 ${app.getVersion()}）`,
+      detail: '由于应用未做 Apple 签名，macOS 无法自动安装更新。点击“立即下载”将为你下载安装包并打开，拖入「应用程序」替换即可。',
+      buttons: ['立即下载', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (choice.response !== 0) return;
+    const asset = pickReleaseAsset(release, /mac-arm64\.dmg$/i);
+    if (!asset) {
+      shell.openExternal(release.html_url);
+      return;
+    }
+    sendToRenderer('app:event', { type: 'update-downloading', version: latest });
+    const target = path.join(app.getPath('downloads'), asset.name);
+    const downloadResponse = await fetch(asset.url, {
+      headers: { 'User-Agent': 'watermark-lab-updater' },
+      redirect: 'follow'
+    });
+    if (!downloadResponse.ok) throw new Error(`下载失败 HTTP ${downloadResponse.status}`);
+    const buffer = Buffer.from(await downloadResponse.arrayBuffer());
+    await fs.writeFile(target, buffer);
+    const openChoice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '下载完成',
+      message: `新版本 ${latest} 安装包已下载完成`,
+      detail: '打开 dmg 后把应用拖入「应用程序」替换旧版即可。',
+      buttons: ['打开安装包', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (openChoice.response === 0) shell.openPath(target);
+  } finally {
+    macUpdateInProgress = false;
+  }
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
+  if (process.platform === 'darwin') {
+    const check = () => checkMacUpdate().catch(() => {});
+    setTimeout(check, 6_000);
+    setInterval(check, 4 * 60 * 60 * 1000);
+    return;
+  }
   let autoUpdater;
   try {
     ({ autoUpdater } = require('electron-updater'));

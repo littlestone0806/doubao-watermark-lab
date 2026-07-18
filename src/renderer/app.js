@@ -871,6 +871,9 @@ api.onAppEvent((event) => {
   if (event?.type === 'update-available') {
     toast(`发现新版本 ${event.version}，正在后台下载，完成后会提示重启`);
   }
+  if (event?.type === 'update-downloading') {
+    toast(`正在下载新版本 ${event.version} 安装包，请稍候…`);
+  }
 });
 
 async function initialize() {
