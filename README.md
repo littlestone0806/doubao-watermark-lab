@@ -28,7 +28,7 @@
 | Windows x64 | `*-win-x64-setup.exe` | 安装版（安装向导中可自选安装目录），SmartScreen 提示时点"更多信息 → 仍要运行" |
 | Windows x64 | `*-win-x64-portable.exe` | 便携版，免安装直接运行；发现新版本时会自动下载新版便携包到当前 exe 所在目录；如被"智能应用控制"拦截见下方说明 |
 | Windows ARM64 | `*-win-arm64-setup.exe` / `*-win-arm64-portable.exe` | Surface Pro X 等 ARM 设备 |
-| 鸿蒙 HarmonyOS NEXT | `*-ohos-arm64.hap` | 未签名安装包，需用 DevEco Studio 自动签名后安装（华为开发者账号免费注册即可），支持设备见下方说明 |
+| 鸿蒙 HarmonyOS NEXT | `*-ohos-arm64.hap` | Tablet / 2in1，未签名包需 DevEco Studio 自动签名安装，详见 [鸿蒙版说明](docs/HARMONYOS.md) |
 
 **macOS "已损坏"提示说明**：应用未做 Apple 签名，浏览器下载的文件会被 Gatekeeper 加上隔离属性，新版 macOS 对此直接报"已损坏"（文件本身并没有坏）。把应用拖入「应用程序」文件夹后，在终端执行一次：
 
@@ -37,15 +37,6 @@ xattr -cr /Applications/水印清理工作台.app
 ```
 
 之后即可正常双击打开（也可以右键 → 打开）。该命令仅移除这个应用的下载隔离标记，不影响系统其他设置。
-
-**鸿蒙版支持设备与安装说明**：鸿蒙版基于 OpenHarmony 官方适配的 Electron（`@electron-ohos/electron-builder`）构建，系统要求 **HarmonyOS NEXT（5.0 及以上）**，设备类型支持 **Tablet（平板）与 2in1（二合一电脑）**；实测不支持 phone（手机），Car / Wearable / TV 未做适配。Release 中的 `.hap` 为未签名包，鸿蒙设备只允许安装已签名的应用，签名只需一次（免费）：
-
-1. 在电脑上安装 [DevEco Studio](https://developer.huawei.com/consumer/cn/deveco-studio/)，注册并登录华为开发者账号（个人账号免费）。
-2. 用 DevEco Studio 打开本仓库 `dist/ohos-arm64-unpacked/ohos_hap` 工程（或自行 `npm run dist:ohos` 重新生成）。
-3. 进入 **File → Project Structure → Signing Configs**，勾选"Automatically generate signature"自动签名。
-4. 点击 **Run** 直接把应用装到已连接的设备（会自动完成签名并安装）；也可以在 Build 菜单构建出已签名 hap 后用 `hdc install` 安装。
-
-鸿蒙版功能与桌面版一致（批量队列、多线程、原图直取、降级裁切、涂抹重绘、批量导出、系统通知等均可用）；受平台能力限制，应用内自动更新与 Dock 图标换色在鸿蒙上不启用，新版本请在 Release 页下载后按上述步骤重新签名安装。
 
 **Windows "智能应用控制已阻止可能不安全的应用"说明**：部分全新安装的 Windows 11 默认开启"智能应用控制"（Smart App Control），它会直接拦截没有代码签名证书的应用，且**没有"仍要运行"选项**。本项目未购买签名证书（拦截不代表软件有问题，源码全部公开，不放心可自行从源码构建）。如遇此拦截：打开 **Windows 安全中心 → 应用和浏览器控制 → 智能应用控制设置 → 选择"关闭"**，之后即可正常运行。注意该开关是单向的，关闭后无法再开启（除非重置系统），关闭不影响杀毒等其他防护。普通 SmartScreen 拦截不受此限，点"更多信息 → 仍要运行"即可。
 
@@ -81,27 +72,10 @@ npm start
 ```bash
 npm run dist                      # 当前平台（macOS：dmg + zip）
 npx electron-builder --win --x64  # 在 macOS 上交叉打包 Windows x64
-npm run dist:ohos                 # 鸿蒙 HAP
+npm run dist:ohos                 # 鸿蒙 HAP（模板已内置 ohos/，详见 docs/HARMONYOS.md）
 ```
 
-产物输出到 `dist/`。未配置代码签名证书时会跳过签名（不影响使用，首次打开按上表提示操作）。
-
-**鸿蒙 HAP 源码构建**：仓库已内置完整鸿蒙工程模板（`ohos/` 目录，基于 [openharmony-sig/electron](https://gitcode.com/openharmony-sig/electron) 预编译引擎，144MB 的 `libelectron.so` 以 zip 形式存放在 `ohos/prebuilt/`），clone 后无需另外下载模板。两种方式任选：
-
-**方式一：直接调试（快速体验，推荐）**
-
-仓库 `ohos/` 模板中已内置最近一次发布的应用代码快照（`app.asar`），开箱即用：
-
-1. 安装 DevEco Studio，用其打开仓库根目录的 `ohos/` 工程（等待依赖同步完成；首次构建会自动从 `ohos/prebuilt/` 解压 144MB 引擎库 `libelectron.so`，只需一次，无需手动操作）。
-2. 进入 **File → Project Structure → Signing Configs**，勾选"Automatically generate signature"自动签名（工程已引用名为 `default` 的签名配置，签名材料生成后即可用；若报 `no signature file`，检查 `ohos/build-profile.json5` 的 `signingConfigs` 是否已有材料）。
-3. 点击 **Run** 装到设备，直接看到完整的水印清理工作台。
-
-**方式二：自行构建最新代码（修改源码后）**
-
-1. 按本机 DevEco 安装位置修改 `electron-builder.ohos.json` 中的 `hvigorwPath` / `ohpmPath` / `sdkPath` 三条路径（Windows 上路径形如 `C:/Program Files/Huawei/DevEco Studio/tools/...`）。
-2. 执行 `npm install && npm run dist:ohos`——预准备脚本自动解压引擎库、用 ohpm 恢复鸿蒙依赖，打出 HAP 到 `dist/ohos-arm64-unpacked/`；完成后会**自动把最新应用代码同步回 `ohos/` 模板**（`npm run sync:ohos` 可单独执行），提交后方式一的快照即更新。
-3. 用 DevEco Studio 打开 `dist/ohos-arm64-unpacked/ohos_hap` 工程（或直接打开 `ohos/`），自动签名后 Run。
-4. 产物为未签名包，安装到设备前请按上方"鸿蒙版支持设备与安装说明"用 DevEco 自动签名。
+产物输出到 `dist/`。未配置代码签名证书时会跳过签名（不影响使用，首次打开按上表提示操作）。鸿蒙版的支持设备、签名安装与直接调试 / 自行构建双模式见 [docs/HARMONYOS.md](docs/HARMONYOS.md)；想把自己的 Electron 项目鸿蒙化，可直接复用仓库内的 Kimi Skill [skills/electron-harmonyos](skills/electron-harmonyos/)。
 
 ## 测试
 
@@ -132,6 +106,7 @@ src/
 scripts/                端到端实测脚本
 test/                   单元测试
 ohos/                   鸿蒙工程模板（openharmony-sig/electron 预编译引擎，引擎库压缩于 prebuilt/）
+skills/                 electron-harmonyos：Electron 鸿蒙化 Kimi Skill（含 .skill 安装包）
 ```
 
 ## 免责与限制

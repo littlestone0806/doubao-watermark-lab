@@ -1,0 +1,38 @@
+{
+  "appId": "com.example.myapp",
+  "productName": "我的应用",
+  "asar": true,
+  "files": [
+    "src/**/*",
+    "package.json"
+  ],
+  "ohos": {
+    "icon": "src/assets/app-icon.png",
+    "target": [
+      "hap"
+    ],
+    "hvigorwPath": "/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin",
+    "ohpmPath": "/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin",
+    "sdkPath": "/Applications/DevEco-Studio.app/Contents/sdk",
+    "ohosHapPath": "./ohos",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.READ_PASTEBOARD",
+        "reason": "读取剪贴板内容（按应用实际需求修改或删除此权限）",
+        "usedScene": {
+          "abilities": [
+            "FormAbility"
+          ],
+          "when": "always"
+        }
+      }
+    ]
+  },
+  "artifactName": "myapp-${version}-${os}-${arch}.${ext}"
+}
