@@ -41,6 +41,7 @@ const elements = {
   outputButton: document.querySelector('#outputButton'),
   outputPath: document.querySelector('#outputPath'),
   openOutputButton: document.querySelector('#openOutputButton'),
+  exportZipButton: document.querySelector('#exportZipButton'),
   cancelButton: document.querySelector('#cancelButton'),
   startButton: document.querySelector('#startButton'),
   startCount: document.querySelector('#startCount'),
@@ -348,6 +349,7 @@ function syncActionState() {
   syncProcessingControls();
   elements.cancelButton.classList.toggle('is-hidden', !state.running);
   elements.startButton.classList.toggle('is-hidden', state.running);
+  elements.exportZipButton.disabled = state.running || !state.files.some((file) => file.status === 'complete' && file.outputPath);
   elements.emptyState.classList.toggle('is-hidden', state.files.length > 0);
   elements.queueListToolbar.classList.toggle('is-hidden', state.files.length === 0);
 }
@@ -843,6 +845,30 @@ elements.outputButton.addEventListener('click', async () => {
 });
 
 elements.openOutputButton.addEventListener('click', () => api.openPath(state.settings.outputDirectory));
+// 导出 ZIP：勾选了已完成任务时只导出勾选项，否则导出全部已完成图片
+elements.exportZipButton.addEventListener('click', async () => {
+  const completed = state.files.filter((file) => file.status === 'complete' && file.outputPath);
+  if (!completed.length) {
+    toast('还没有已完成的图片可以导出');
+    return;
+  }
+  const selected = completed.filter((file) => file.selected !== false);
+  const targets = selected.length ? selected : completed;
+  elements.exportZipButton.disabled = true;
+  try {
+    const result = await api.exportZip(targets.map((file) => file.outputPath));
+    if (result?.cancelled) return;
+    if (result?.exported) {
+      toast(`已导出 ${result.exported} 张图片：${result.zipPath}`);
+    } else {
+      toast('没有可导出的图片');
+    }
+  } catch (error) {
+    toast(error.message || String(error), 'error');
+  } finally {
+    syncActionState();
+  }
+});
 elements.previewBackdrop.addEventListener('click', closePreview);
 elements.previewClose.addEventListener('click', closePreview);
 elements.previewZoomOut.addEventListener('click', () => stepPreviewZoom(-1));

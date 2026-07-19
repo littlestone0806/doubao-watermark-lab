@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('watermarkLab', {
   startManualEdit: (payload) => ipcRenderer.invoke('manual:start', payload),
   cancelBatch: () => ipcRenderer.invoke('batch:cancel'),
   openPath: (targetPath) => ipcRenderer.invoke('path:open', targetPath),
+  exportZip: (paths) => ipcRenderer.invoke('export:zip', { paths }),
   onLoginStatus: (callback) => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('login:status', listener);

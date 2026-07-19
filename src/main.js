@@ -16,6 +16,7 @@ const {
   saveProcessedImage
 } = require('./image-pipeline');
 const { buildManualEditPrompt, buildPrompt, DEFAULT_PROMPT, MANUAL_EDIT_PROMPT } = require('./prompt');
+const { writeZipFile } = require('./zip-writer');
 
 const DOUBAO_PARTITION = 'persist:watermark-lab-doubao';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'app-icon.png');
@@ -1279,6 +1280,38 @@ function registerIpc() {
   ipcMain.handle('path:open', async (_event, targetPath) => {
     if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) return '无效路径';
     return shell.openPath(targetPath);
+  });
+  // 一键导出：把已完成任务的输出图打包成 zip（导出哪些由渲染进程决定：勾选项优先，否则全部已完成）
+  ipcMain.handle('export:zip', async (_event, payload) => {
+    const paths = (Array.isArray(payload?.paths) ? payload.paths : [])
+      .filter((item) => typeof item === 'string' && path.isAbsolute(item));
+    if (!paths.length) return { exported: 0 };
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const defaultName = `水印清理结果-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.zip`;
+    const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: '导出为 ZIP',
+      defaultPath: path.join(app.getPath('downloads'), defaultName),
+      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }]
+    });
+    if (canceled || !filePath) return { cancelled: true };
+    // zip 内文件名按输出文件名，重名时追加序号
+    const used = new Set();
+    const entries = [];
+    for (const item of paths) {
+      const ext = path.extname(item);
+      const base = path.basename(item, ext) || 'image';
+      let name = `${base}${ext}`;
+      let seq = 2;
+      while (used.has(name.toLowerCase())) {
+        name = `${base} (${seq})${ext}`;
+        seq += 1;
+      }
+      used.add(name.toLowerCase());
+      entries.push({ name, path: item });
+    }
+    const exported = await writeZipFile(filePath, entries);
+    return { exported, zipPath: filePath };
   });
 }
 
