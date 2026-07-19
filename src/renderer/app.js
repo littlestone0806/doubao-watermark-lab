@@ -349,7 +349,7 @@ function syncActionState() {
   syncProcessingControls();
   elements.cancelButton.classList.toggle('is-hidden', !state.running);
   elements.startButton.classList.toggle('is-hidden', state.running);
-  elements.exportZipButton.disabled = state.running || !state.files.some((file) => file.status === 'complete' && file.outputPath);
+  elements.exportZipButton.disabled = state.running || !state.files.some((file) => file.status === 'complete' && file.outputPath && file.selected !== false);
   elements.emptyState.classList.toggle('is-hidden', state.files.length > 0);
   elements.queueListToolbar.classList.toggle('is-hidden', state.files.length === 0);
 }
@@ -845,15 +845,13 @@ elements.outputButton.addEventListener('click', async () => {
 });
 
 elements.openOutputButton.addEventListener('click', () => api.openPath(state.settings.outputDirectory));
-// 导出 ZIP：勾选了已完成任务时只导出勾选项，否则导出全部已完成图片
+// 批量导出：只打包勾选的已完成图片（按钮也只在有勾选的已完成任务时可用）
 elements.exportZipButton.addEventListener('click', async () => {
-  const completed = state.files.filter((file) => file.status === 'complete' && file.outputPath);
-  if (!completed.length) {
-    toast('还没有已完成的图片可以导出');
+  const targets = state.files.filter((file) => file.status === 'complete' && file.outputPath && file.selected !== false);
+  if (!targets.length) {
+    toast('请先勾选要导出的已完成任务');
     return;
   }
-  const selected = completed.filter((file) => file.selected !== false);
-  const targets = selected.length ? selected : completed;
   elements.exportZipButton.disabled = true;
   try {
     const result = await api.exportZip(targets.map((file) => file.outputPath));
