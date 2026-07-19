@@ -86,16 +86,22 @@ npm run dist:ohos                 # 鸿蒙 HAP
 
 产物输出到 `dist/`。未配置代码签名证书时会跳过签名（不影响使用，首次打开按上表提示操作）。
 
-**鸿蒙 HAP 源码构建**：仓库已内置完整鸿蒙工程模板（`ohos/` 目录，基于 [openharmony-sig/electron](https://gitcode.com/openharmony-sig/electron) 预编译引擎，144MB 的 `libelectron.so` 以 zip 形式存放在 `ohos/prebuilt/`），clone 后即可构建，无需另外下载模板：
+**鸿蒙 HAP 源码构建**：仓库已内置完整鸿蒙工程模板（`ohos/` 目录，基于 [openharmony-sig/electron](https://gitcode.com/openharmony-sig/electron) 预编译引擎，144MB 的 `libelectron.so` 以 zip 形式存放在 `ohos/prebuilt/`），clone 后无需另外下载模板。两种方式任选：
 
-1. 安装 DevEco Studio（含 hvigor / ohpm / SDK）。
-2. 按本机 DevEco 安装位置修改 `electron-builder.ohos.json` 中的 `hvigorwPath` / `ohpmPath` / `sdkPath` 三条路径（Windows 上路径形如 `C:/Program Files/Huawei/DevEco Studio/tools/...`）。
-3. 执行 `npm run dist:ohos`——预准备脚本会自动解压引擎库、用 ohpm 恢复鸿蒙依赖（`oh_modules`），随后打出 HAP 到 `dist/ohos-arm64-unpacked/`。
+**方式一：直接调试（快速体验，推荐）**
+
+仓库 `ohos/` 模板中已内置最近一次发布的应用代码快照（`app.asar`），开箱即用：
+
+1. 安装 DevEco Studio，用其打开仓库根目录的 `ohos/` 工程（等待依赖同步完成）。
+2. 进入 **File → Project Structure → Signing Configs**，勾选"Automatically generate signature"自动签名（工程已引用名为 `default` 的签名配置，签名材料生成后即可用；若报 `no signature file`，检查 `ohos/build-profile.json5` 的 `signingConfigs` 是否已有材料）。
+3. 点击 **Run** 装到设备，直接看到完整的水印清理工作台。
+
+**方式二：自行构建最新代码（修改源码后）**
+
+1. 按本机 DevEco 安装位置修改 `electron-builder.ohos.json` 中的 `hvigorwPath` / `ohpmPath` / `sdkPath` 三条路径（Windows 上路径形如 `C:/Program Files/Huawei/DevEco Studio/tools/...`）。
+2. 执行 `npm install && npm run dist:ohos`——预准备脚本自动解压引擎库、用 ohpm 恢复鸿蒙依赖，打出 HAP 到 `dist/ohos-arm64-unpacked/`；完成后会**自动把最新应用代码同步回 `ohos/` 模板**（`npm run sync:ohos` 可单独执行），提交后方式一的快照即更新。
+3. 用 DevEco Studio 打开 `dist/ohos-arm64-unpacked/ohos_hap` 工程（或直接打开 `ohos/`），自动签名后 Run。
 4. 产物为未签名包，安装到设备前请按上方"鸿蒙版支持设备与安装说明"用 DevEco 自动签名。
-
-> 提示：用 DevEco Studio 直接 Run 仓库根目录的 `ohos/` 工程时，请先在 **File → Project Structure → Signing Configs** 完成自动签名；工程已在 product 中引用名为 `default` 的签名配置，签名材料生成后即可直接调试运行。若仍报 `no signature file`，检查 `ohos/build-profile.json5` 的 `signingConfigs` 是否已有自动生成的证书材料。
->
-> 注意：直接 Run 根目录的 `ohos/` 模板启动的是**引擎容器占位页**（应用代码尚未注入）；要调试真实应用，请先执行 `npm run dist:ohos`，再用 DevEco Studio 打开生成的 `dist/ohos-arm64-unpacked/ohos_hap` 工程签名运行。
 
 ## 测试
 

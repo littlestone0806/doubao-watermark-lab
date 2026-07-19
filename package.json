@@ -13,7 +13,9 @@
     "postinstall": "node scripts/fix-electron-name.cjs",
     "dist": "electron-builder",
     "predist:ohos": "node scripts/prepare-ohos-libs.cjs",
-    "dist:ohos": "JAVA_HOME=\"/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home\" electron-builder-ohos --ohos -c electron-builder.ohos.json"
+    "dist:ohos": "JAVA_HOME=\"/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home\" electron-builder-ohos --ohos -c electron-builder.ohos.json",
+    "postdist:ohos": "node scripts/sync-ohos-app.cjs",
+    "sync:ohos": "node scripts/sync-ohos-app.cjs"
   },
   "devDependencies": {
     "electron": "43.1.1",
