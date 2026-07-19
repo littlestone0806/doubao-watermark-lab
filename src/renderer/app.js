@@ -450,6 +450,20 @@ function makeQueueItem(file, index) {
   meta.className = 'queue-meta';
   meta.textContent = `${file.width} × ${file.height} · ${formatBytes(file.bytes)}`;
   copy.append(name, meta);
+  // 采集来源小标记：直取原图（接口拦截，未加工）/ 降级裁切（加隔离带重发）/ 页面采集（无隔离带）
+  if (file.status === 'complete' && file.captureSource) {
+    const flag = document.createElement('span');
+    const isRaw = file.captureSource === 'api-raw';
+    const isFallback = !isRaw && file.removedUploadPadding === true;
+    flag.className = `capture-flag ${isRaw ? 'is-raw' : isFallback ? 'is-fallback' : 'is-page'}`;
+    flag.textContent = isRaw ? '直取原图' : isFallback ? '降级裁切' : '页面采集';
+    flag.title = isRaw
+      ? '已从豆包接口直取无水印原图：未加隔离带、未裁切'
+      : isFallback
+        ? '接口未拦截到无水印原图，已自动加隔离带重发并完成裁切'
+        : '接口未拦截到无水印原图，已使用页面生成结果（未加隔离带）';
+    copy.append(flag);
+  }
   if (file.status === 'complete' && file.qc && file.qc.verdict !== 'ok') {
     const flag = document.createElement('span');
     flag.className = 'qc-flag';
