@@ -94,6 +94,8 @@ npm run dist:ohos                 # 鸿蒙 HAP
 4. 产物为未签名包，安装到设备前请按上方"鸿蒙版支持设备与安装说明"用 DevEco 自动签名。
 
 > 提示：用 DevEco Studio 直接 Run 仓库根目录的 `ohos/` 工程时，请先在 **File → Project Structure → Signing Configs** 完成自动签名；工程已在 product 中引用名为 `default` 的签名配置，签名材料生成后即可直接调试运行。若仍报 `no signature file`，检查 `ohos/build-profile.json5` 的 `signingConfigs` 是否已有自动生成的证书材料。
+>
+> 注意：直接 Run 根目录的 `ohos/` 模板启动的是**引擎容器占位页**（应用代码尚未注入）；要调试真实应用，请先执行 `npm run dist:ohos`，再用 DevEco Studio 打开生成的 `dist/ohos-arm64-unpacked/ohos_hap` 工程签名运行。
 
 ## 测试
 

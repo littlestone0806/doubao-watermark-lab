@@ -1,12 +1,7 @@
 {
-  "name": "electron-example",
+  "name": "watermark-lab-ohos-shell",
   "version": "1.0.0",
-  "description": "Electron simple example",
-  "main": "main.js",
-  "scripts": {
-    "start": "electron ."
-  },
-  "devDependencies": {
-    "electron": "^25.3.2"
-  }
+  "private": true,
+  "description": "水印清理工作台 · 鸿蒙引擎容器占位页",
+  "main": "index.js"
 }

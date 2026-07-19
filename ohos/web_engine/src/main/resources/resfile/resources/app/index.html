@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>水印清理工作台 · 鸿蒙引擎容器</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+           background: linear-gradient(160deg, #10201a, #0a1712); color: #d7e5de;
+           font: 15px/1.9 -apple-system, "PingFang SC", sans-serif; }
+    .card { max-width: 560px; padding: 40px 44px; background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08); border-radius: 16px; }
+    h1 { font-size: 20px; margin: 0 0 6px; color: #4ade80; }
+    .sub { color: #7d9b90; font-size: 12.5px; margin-bottom: 18px; }
+    code { background: rgba(125,211,138,.12); color: #7dd3fc; border-radius: 5px; padding: 1px 7px; font-size: 13.5px; }
+    ol { margin: 12px 0 0; padding-left: 22px; }
+    li { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>水印清理工作台 · 鸿蒙引擎容器</h1>
+    <div class="sub">引擎运行正常 ✅ 但当前工程里还没有注入应用代码</div>
+    直接 Run 仓库根目录的 <code>ohos/</code> 模板只会显示本占位页。要运行真实应用：
+    <ol>
+      <li>在仓库根目录执行 <code>npm install && npm run dist:ohos</code></li>
+      <li>用 DevEco Studio 打开 <code>dist/ohos-arm64-unpacked/ohos_hap</code></li>
+      <li>Project Structure → Signing Configs 勾选自动签名，点击 Run</li>
+    </ol>
+  </div>
+</body>
+</html>
