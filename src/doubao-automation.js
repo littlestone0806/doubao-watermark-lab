@@ -86,6 +86,45 @@ function pageNewConversationReady() {
   return Boolean(document.querySelector('input[type="file"]'));
 }
 
+// ---------- 无水印原图直取（集成自 doubao-no-watermark 项目） ----------
+// 原理：豆包 chat/completion 接口的 SSE 流里直接返回 image_ori_raw.url（无水印原图地址），
+// 页面展示的是带水印缩略图（image_thumb）。递归深搜比硬编码字段路径更抗接口结构变化。
+function harvestImageRawUrls(node, found, depth = 0) {
+  if (!node || depth > 12) return;
+  if (Array.isArray(node)) {
+    for (const item of node) harvestImageRawUrls(item, found, depth + 1);
+    return;
+  }
+  if (typeof node !== 'object') return;
+  const raw = node.image_ori_raw;
+  if (raw && typeof raw.url === 'string' && /^https?:\/\//i.test(raw.url)) {
+    const key = (String(raw.url).match(/rc_gen_image\/([^?~]+)/) || [])[1] || raw.url;
+    if (!found.has(key)) {
+      found.set(key, {
+        url: raw.url,
+        watermarkUrl: typeof node.image_thumb?.url === 'string' ? node.image_thumb.url : null,
+        width: Number(raw.width) || 0,
+        height: Number(raw.height) || 0,
+        source: 'api-raw',
+        likelyOriginal: true,
+        seenAt: Date.now()
+      });
+    }
+  }
+  for (const value of Object.values(node)) harvestImageRawUrls(value, found, depth + 1);
+}
+
+// 解析 SSE 文本：按事件块切分，取 data: 行的 JSON 递归提取
+function harvestSseText(text, found) {
+  for (const chunk of String(text || '').split('\n\n')) {
+    const match = chunk.match(/^data: (.+)$/m);
+    if (!match) continue;
+    try {
+      harvestImageRawUrls(JSON.parse(match[1]), found);
+    } catch { /* 心跳或非 JSON 事件，忽略 */ }
+  }
+}
+
 function pageLoginStatus() {
   const visible = (element) => {
     const rect = element.getBoundingClientRect();
@@ -829,6 +868,52 @@ class DoubaoAutomation {
     };
   }
 
+  // 无水印原图直取（doubao-no-watermark 方案）：通过 CDP Network 域旁路读取
+  // chat/completion 的 SSE 响应体，提取服务端直接返回的 image_ori_raw 无水印原图地址。
+  // 不注入页面、不改动页面任何行为；抓不到时调用方回退原有白边裁切管线。
+  startApiRawCapture() {
+    const found = new Map();
+    const pending = new Set();
+    const debuggerApi = this.webContents.debugger;
+    try {
+      if (!debuggerApi.isAttached()) debuggerApi.attach('1.3');
+    } catch { /* 已被其他模块附加 */ }
+    const onMessage = (_event, method, params) => {
+      try {
+        if (method === 'Network.responseReceived') {
+          const url = params?.response?.url || '';
+          if (url.includes('chat/completion')) pending.add(params.requestId);
+          return;
+        }
+        if (method === 'Network.loadingFinished' && pending.has(params.requestId)) {
+          const requestId = params.requestId;
+          pending.delete(requestId);
+          debuggerApi.sendCommand('Network.getResponseBody', { requestId })
+            .then((body) => {
+              const text = body?.base64Encoded
+                ? Buffer.from(body.body || '', 'base64').toString('utf8')
+                : body?.body;
+              if (!text) return;
+              const before = found.size;
+              harvestSseText(text, found);
+              if (found.size > before) this.onProgress('已拦截到豆包返回的无水印原图');
+            })
+            .catch(() => { /* 响应体不可用（流已释放等），回退旧管线 */ });
+        }
+      } catch { /* 单条消息异常不影响捕获 */ }
+    };
+    debuggerApi.on('message', onMessage);
+    debuggerApi.sendCommand('Network.enable').catch(() => {});
+    return {
+      candidates: found,
+      pendingCount: () => pending.size,
+      stop: () => {
+        debuggerApi.removeListener('message', onMessage);
+        pending.clear();
+      }
+    };
+  }
+
   async enterPrompt(prompt) {
     this.onProgress('正在填写处理指令');
     const result = await waitFor(
@@ -858,7 +943,8 @@ class DoubaoAutomation {
     baselineFollowUps = 0,
     baselineTailText = '',
     promptText = '',
-    noImageGraceMs = DEFAULT_NO_IMAGE_GRACE_MS
+    noImageGraceMs = DEFAULT_NO_IMAGE_GRACE_MS,
+    apiRawCapture = null
   } = {}) {
     this.onProgress('豆包正在重绘图片');
     const started = Date.now();
@@ -898,6 +984,9 @@ class DoubaoAutomation {
         /\/rc_gen_image\/|downsize_watermark|(?:^|[/_-])(?:generated|aigc|generate)(?:[/_.-]|$)/i.test(candidate.url)
       );
       const candidateCount = latestDomCandidates.length + generatedNetworkCandidates.length;
+      const apiRawCandidates = apiRawCapture ? [...apiRawCapture.candidates.values()] : [];
+      const apiPending = apiRawCapture ? apiRawCapture.pendingCount() : 0;
+      const totalCandidates = candidateCount + apiRawCandidates.length;
       // 已出现在页面上但还没下载完成的生成图：说明图片正在路上，不能按“没生成”处理
       const pendingImageCount = snapshot.images
         .filter((image) => image.pending)
@@ -909,8 +998,8 @@ class DoubaoAutomation {
         })
         .filter((image) => image.displayWidth >= 80 && image.displayHeight >= 60)
         .length;
-      if (candidateCount && !firstCandidateAt) firstCandidateAt = Date.now();
-      const signature = `${latestDomCandidates.map((item) => item.url).join('|')}::${generatedNetworkCandidates.map((item) => item.url).join('|')}`;
+      if (totalCandidates && !firstCandidateAt) firstCandidateAt = Date.now();
+      const signature = `${apiRawCandidates.length}::${latestDomCandidates.map((item) => item.url).join('|')}::${generatedNetworkCandidates.map((item) => item.url).join('|')}`;
       if (signature !== lastSignature) {
         lastSignature = signature;
         stableSince = Date.now();
@@ -918,8 +1007,9 @@ class DoubaoAutomation {
 
       const stableFor = Date.now() - stableSince;
       const visibleFor = firstCandidateAt ? Date.now() - firstCandidateAt : 0;
-      if (candidateCount && !snapshot.generating && stableFor > 6500 && visibleFor > 5500) {
-        return [...latestDomCandidates, ...generatedNetworkCandidates];
+      // 有 chat/completion 仍在流式返回时不收兵：无水印原图（api-raw）在流结束时才落袋
+      if (totalCandidates && !snapshot.generating && !apiPending && stableFor > 6500 && visibleFor > 5500) {
+        return [...apiRawCandidates, ...latestDomCandidates, ...generatedNetworkCandidates];
       }
 
       // 尾部文本持续变化说明回复正在流式输出；用户消息回显还停在尾部时除外（那是我们自己发的内容）
@@ -936,7 +1026,7 @@ class DoubaoAutomation {
       if (snapshot.generating) sawGenerating = true;
       if (Number(snapshot.finishedReplies) > baselineFinishedReplies) sawReplyFinished = true;
       if (Number(snapshot.followUps) > baselineFollowUps) sawReplyFinished = true;
-      if (candidateCount || pendingImageCount || snapshot.generating) {
+      if (totalCandidates || pendingImageCount || snapshot.generating || apiPending) {
         idleSince = 0;
         generationDoneSince = 0;
       } else {
@@ -949,15 +1039,15 @@ class DoubaoAutomation {
         }
       }
 
-      if (!candidateCount && !pendingImageCount && generationDoneSince && Date.now() - generationDoneSince > noImageGraceMs) {
+      if (!totalCandidates && !pendingImageCount && generationDoneSince && Date.now() - generationDoneSince > noImageGraceMs) {
         throw noImageGeneratedError(snapshot.assistantTailText || snapshot.tailText, promptText);
       }
-      if (!candidateCount && Date.now() - started > 35_000 && /抱歉|无法处理|不能完成|未能生成/.test(snapshot.tailText)) {
+      if (!totalCandidates && Date.now() - started > 35_000 && /抱歉|无法处理|不能完成|未能生成/.test(snapshot.tailText)) {
         const textOnlyError = new Error('豆包返回了文字提示，但没有生成图片；可调整提示词后重试');
         textOnlyError.code = 'NO_IMAGE_GENERATED';
         throw textOnlyError;
       }
-      if (!candidateCount && idleSince && Date.now() - started > 90_000 && Date.now() - idleSince > 45_000) {
+      if (!totalCandidates && idleSince && Date.now() - started > 90_000 && Date.now() - idleSince > 45_000) {
         throw noImageGeneratedError(snapshot.assistantTailText || snapshot.tailText, promptText);
       }
       await sleep(1400);
@@ -966,7 +1056,8 @@ class DoubaoAutomation {
     const fallbackNetworkCandidates = [...networkCapture.candidates.values()].filter((candidate) =>
       /\/rc_gen_image\/|downsize_watermark|(?:^|[/_-])(?:generated|aigc|generate)(?:[/_.-]|$)/i.test(candidate.url)
     );
-    const fallback = [...latestDomCandidates, ...fallbackNetworkCandidates];
+    const fallbackApiRaw = apiRawCapture ? [...apiRawCapture.candidates.values()] : [];
+    const fallback = [...fallbackApiRaw, ...latestDomCandidates, ...fallbackNetworkCandidates];
     if (fallback.length) return fallback;
     throw new Error('等待豆包生成图片超时');
   }
@@ -991,6 +1082,8 @@ class DoubaoAutomation {
     const baseline = await runInPage(this.webContents, pageImageSnapshot);
     const baselineUrls = new Set(baseline.images.map((image) => image.url));
     const capture = this.startNetworkCapture(baselineUrls);
+    // 无水印原图直取捕获：与页面候选并行，抓不到时自然回退白边裁切管线
+    const apiRawCapture = this.startApiRawCapture();
     try {
       await this.enterPrompt(prompt);
       await this.waitForVerificationIfNeeded();
@@ -1008,7 +1101,8 @@ class DoubaoAutomation {
           baselineFollowUps: Number(baseline.followUps) || 0,
           baselineTailText: baseline.tailText || '',
           promptText: prompt,
-          noImageGraceMs: imageWaitSeconds > 0 ? imageWaitSeconds * 1000 : DEFAULT_NO_IMAGE_GRACE_MS
+          noImageGraceMs: imageWaitSeconds > 0 ? imageWaitSeconds * 1000 : DEFAULT_NO_IMAGE_GRACE_MS,
+          apiRawCapture
         });
         return { candidates, conversationId: capturedConversationId };
       } catch (error) {
@@ -1017,6 +1111,7 @@ class DoubaoAutomation {
       }
     } finally {
       capture.stop();
+      apiRawCapture.stop();
     }
   }
 
@@ -1160,6 +1255,8 @@ module.exports = {
   DOUBAO_CHAT_URL,
   DoubaoAutomation,
   conversationIdFromUrl,
+  harvestImageRawUrls,
+  harvestSseText,
   imageAssetKey,
   noImageGeneratedError,
   pageLoginStatus,

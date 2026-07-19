@@ -23,6 +23,11 @@ function createUrlVariants(candidate) {
   const source = typeof candidate === 'string' ? 'network' : candidate?.source || 'network';
   if (!rawUrl || !/^https?:\/\//i.test(rawUrl)) return [];
 
+  // 接口直取的无水印原图（api-raw）：签名地址不做任何变体改写，原样使用并标记为原图
+  if (source === 'api-raw') {
+    return [{ url: rawUrl, source, kind: 'api-raw-original', likelyOriginal: true }];
+  }
+
   let parsed;
   try {
     parsed = new URL(rawUrl);

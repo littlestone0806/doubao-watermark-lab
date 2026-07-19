@@ -47,6 +47,8 @@ async function fetchWithTimeout(electronSession, url, timeoutMs = 18000) {
 function scoreImage(item, preferOriginal) {
   const area = item.width * item.height;
   let score = area;
+  // 接口直取的无水印原图永远优先：它是服务端返回的未经页面压缩的原始生成结果
+  if (item.source === 'api-raw') score += area * 2;
   if (item.source === 'dom') score += area * 0.18;
   if (preferOriginal && item.likelyOriginal) score += area * 0.45;
   if (item.kind === 'processed') score -= area * 0.12;
@@ -354,6 +356,10 @@ async function saveProcessedImage({ candidate, sourcePath, outputDirectory, sett
   let appliedCropPercent = 0;
 
   if (crop) {
+    // api-raw 原图本身无 AI 标识，不存在标识溢出白边的问题，补偿为 0（精确裁掉白边即可）
+    const compensationPercent = candidate.source === 'api-raw'
+      ? 0
+      : Number(settings.cropCompensationPercent) || 0;
     const rectangle = paddedUpload
       ? restoreOriginalAspectRectangle(
         candidate.width,
@@ -361,7 +367,7 @@ async function saveProcessedImage({ candidate, sourcePath, outputDirectory, sett
         paddedUpload.originalWidth,
         paddedUpload.originalHeight,
         cropEdge,
-        settings.cropCompensationPercent
+        compensationPercent
       )
       : cropRectangle(candidate.width, candidate.height, percent, cropEdge);
     const cropped = candidate.image.crop(rectangle);
@@ -381,10 +387,11 @@ async function saveProcessedImage({ candidate, sourcePath, outputDirectory, sett
     cropped: crop,
     cropPercent: crop ? appliedCropPercent : 0,
     cropEdge: crop ? cropEdge : null,
-    cropCompensationPercent: paddedUpload ? Number(settings.cropCompensationPercent) || 0 : 0,
+    cropCompensationPercent: candidate.source === 'api-raw' ? 0 : (paddedUpload ? Number(settings.cropCompensationPercent) || 0 : 0),
     removedUploadPadding: Boolean(paddedUpload),
     usedLikelyOriginal: candidate.likelyOriginal,
-    discoveryKind: candidate.kind
+    discoveryKind: candidate.kind,
+    captureSource: candidate.source || null
   };
 }
 

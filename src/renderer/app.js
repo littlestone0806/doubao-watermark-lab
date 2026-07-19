@@ -640,6 +640,7 @@ function handleBatchEvent(event) {
         cropPercent: event.cropPercent,
         cropEdge: event.cropEdge,
         removedUploadPadding: event.removedUploadPadding,
+        captureSource: event.captureSource || null,
         outputWidth: event.width,
         outputHeight: event.height,
         progress: 100
