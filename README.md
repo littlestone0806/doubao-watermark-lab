@@ -31,8 +31,9 @@
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
 | macOS（Apple 芯片） | `*-mac-arm64.dmg` / `.zip` | 未签名，打开提示"已损坏"时在终端执行 `xattr -cr /Applications/水印清理工作台.app` 即可（见下方说明） |
-| Windows x64 | `*-win-x64-setup.exe` | 安装版，SmartScreen 提示时点"更多信息 → 仍要运行" |
-| Windows x64 | `*-win-x64-portable.exe` | 便携版，免安装直接运行 |
+| Windows x64 | `*-win-x64-setup.exe` | 安装版（安装向导中可自选安装目录），SmartScreen 提示时点"更多信息 → 仍要运行" |
+| Windows x64 | `*-win-x64-portable.exe` | 便携版，免安装直接运行；如被"智能应用控制"拦截见下方说明 |
+| Windows ARM64 | `*-win-arm64-setup.exe` / `*-win-arm64-portable.exe` | Surface Pro X 等 ARM 设备 |
 
 **macOS "已损坏"提示说明**：应用未做 Apple 签名，浏览器下载的文件会被 Gatekeeper 加上隔离属性，新版 macOS 对此直接报"已损坏"（文件本身并没有坏）。把应用拖入「应用程序」文件夹后，在终端执行一次：
 
@@ -41,6 +42,8 @@ xattr -cr /Applications/水印清理工作台.app
 ```
 
 之后即可正常双击打开（也可以右键 → 打开）。该命令仅移除这个应用的下载隔离标记，不影响系统其他设置。
+
+**Windows "智能应用控制已阻止可能不安全的应用"说明**：部分全新安装的 Windows 11 默认开启"智能应用控制"（Smart App Control），它会直接拦截没有代码签名证书的应用，且**没有"仍要运行"选项**。本项目未购买签名证书（拦截不代表软件有问题，源码全部公开，不放心可自行从源码构建）。如遇此拦截：打开 **Windows 安全中心 → 应用和浏览器控制 → 智能应用控制设置 → 选择"关闭"**，之后即可正常运行。注意该开关是单向的，关闭后无法再开启（除非重置系统），关闭不影响杀毒等其他防护。普通 SmartScreen 拦截不受此限，点"更多信息 → 仍要运行"即可。
 
 首次使用：
 
@@ -82,7 +85,7 @@ npx electron-builder --win --x64  # 在 macOS 上交叉打包 Windows x64
 
 ```bash
 npm run check   # 全部源码语法检查
-npm test        # 单元测试（test/ 目录，39 个用例）
+npm test        # 单元测试（test/ 目录，51 个用例）
 ```
 
 `scripts/` 下是端到端实测脚本，通过 Chrome DevTools Protocol 驱动真实应用与已登录的豆包页面，覆盖会话接回、并行停止、无图报错等场景。运行前需要本机已登录豆包；个别探测脚本需要通过环境变量传入测试会话，例如：
