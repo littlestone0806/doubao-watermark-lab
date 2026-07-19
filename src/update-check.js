@@ -29,4 +29,9 @@ function pickReleaseAsset(release, pattern) {
   return { name: asset.name, url: asset.browser_download_url };
 }
 
-module.exports = { compareVersions, newerVersionFromRelease, pickReleaseAsset };
+// Windows 便携版更新包的匹配模式：按运行时架构挑选对应的 win-<arch>-portable.exe
+function portableAssetPattern(arch) {
+  return arch === 'arm64' ? /-win-arm64-portable\.exe$/i : /-win-x64-portable\.exe$/i;
+}
+
+module.exports = { compareVersions, newerVersionFromRelease, pickReleaseAsset, portableAssetPattern };

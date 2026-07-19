@@ -1304,9 +1304,10 @@ function registerEditShortcuts() {
   });
 }
 
-// 自动更新：启动后静默检查 GitHub Releases，有新版时后台下载，下载完成后询问是否重启安装。
-// 未签名的 macOS 包无法自动安装更新（Squirrel 限制），检查/下载会静默失败，用户仍走发布页手动下载。
-// macOS 未签名包无法使用 Squirrel 自动更新：改为 GitHub API 检查 + 引导下载 dmg（半自动更新）
+// 自动更新：启动后静默检查，之后每 4 小时复查一次。
+// Windows 安装版：electron-updater 后台下载 setup 安装包，下载完成后询问是否重启安装。
+// Windows 便携版：electron-updater 不识别便携包，走 GitHub API 半自动流程，下载新版便携包到 exe 所在目录。
+// macOS：未签名包无法使用 Squirrel 自动安装，走 GitHub API 检查 + 下载 dmg 引导手动替换（半自动更新）
 let macUpdateInProgress = false;
 async function checkMacUpdate() {
   const { newerVersionFromRelease, pickReleaseAsset } = require('./update-check');
@@ -1360,10 +1361,77 @@ async function checkMacUpdate() {
   }
 }
 
+// Windows 便携版更新：electron-updater 不识别便携包（会错把 setup 安装包装进系统），
+// 改为 GitHub API 检查 + 下载新版便携包到当前 exe 所在目录，用户关闭软件后运行新文件即可
+let portableUpdateInProgress = false;
+async function checkPortableUpdate() {
+  const portableExe = process.env.PORTABLE_EXECUTABLE_FILE;
+  if (!portableExe || portableUpdateInProgress) return;
+  const { newerVersionFromRelease, pickReleaseAsset, portableAssetPattern } = require('./update-check');
+  const response = await fetch('https://api.github.com/repos/littlestone0806/doubao-watermark-lab/releases/latest', {
+    headers: { 'User-Agent': 'watermark-lab-updater', Accept: 'application/vnd.github+json' }
+  });
+  if (!response.ok) return;
+  const release = await response.json();
+  const latest = newerVersionFromRelease(release, app.getVersion());
+  if (!latest) return;
+  const asset = pickReleaseAsset(release, portableAssetPattern(process.arch));
+  if (!asset) return;
+  portableUpdateInProgress = true;
+  try {
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '发现新版本',
+      message: `新版本 ${latest} 已发布（当前 ${app.getVersion()}）`,
+      detail: '将下载新版便携包到当前软件所在目录，下载完成后关闭软件、运行新文件即可。',
+      buttons: ['立即下载', '稍后'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (choice.response !== 0) return;
+    sendToRenderer('app:event', { type: 'update-downloading', version: latest });
+    const downloadResponse = await fetch(asset.url, {
+      headers: { 'User-Agent': 'watermark-lab-updater' },
+      redirect: 'follow'
+    });
+    if (!downloadResponse.ok) throw new Error(`下载失败 HTTP ${downloadResponse.status}`);
+    const buffer = Buffer.from(await downloadResponse.arrayBuffer());
+    // 优先写到便携 exe 所在目录；无写权限（如 Program Files）时回退到系统下载目录
+    let target = path.join(path.dirname(portableExe), asset.name);
+    try {
+      await fs.writeFile(target, buffer);
+    } catch {
+      target = path.join(app.getPath('downloads'), asset.name);
+      await fs.writeFile(target, buffer);
+    }
+    const doneChoice = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: '下载完成',
+      message: `新版本 ${latest} 便携包已下载完成`,
+      detail: `已保存到：${path.dirname(target)}\n关闭软件后运行新的 ${asset.name} 即可，旧文件可手动删除。`,
+      buttons: ['打开所在目录', '好的'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (doneChoice.response === 0) shell.showItemInFolder(target);
+  } finally {
+    portableUpdateInProgress = false;
+  }
+}
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
   if (process.platform === 'darwin') {
     const check = () => checkMacUpdate().catch(() => {});
+    setTimeout(check, 6_000);
+    setInterval(check, 4 * 60 * 60 * 1000);
+    return;
+  }
+  // Windows 便携版走独立更新流程：下载新版便携包到 exe 所在目录，不走 electron-updater 安装
+  if (process.platform === 'win32' && process.env.PORTABLE_EXECUTABLE_FILE) {
+    const check = () => checkPortableUpdate().catch(() => {});
     setTimeout(check, 6_000);
     setInterval(check, 4 * 60 * 60 * 1000);
     return;
