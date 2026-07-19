@@ -64,6 +64,28 @@ async function runInPage(webContents, fn, ...args) {
   }
 }
 
+// 会话页就绪探针：输入框或上传控件出现即视为可以继续，用于替代导航后的固定 sleep
+function pageChatInputReady() {
+  const composer = document.querySelector('textarea, [contenteditable="true"]');
+  if (composer) {
+    const rect = composer.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+  }
+  return Boolean(document.querySelector('input[type="file"]'));
+}
+
+// 新对话就绪探针：点击"新对话"后旧会话视图还会短暂残留（旧输入框/上传控件仍在），
+// 必须等 URL 中的会话 ID 消失（视图已切换）且输入控件就绪，否则可能把图片传进旧会话
+function pageNewConversationReady() {
+  if (/\/chat\/[0-9a-zA-Z]{8,}(?:[/?#]|$)/.test(location.href)) return false;
+  const composer = document.querySelector('textarea, [contenteditable="true"]');
+  if (composer) {
+    const rect = composer.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+  }
+  return Boolean(document.querySelector('input[type="file"]'));
+}
+
 function pageLoginStatus() {
   const visible = (element) => {
     const rect = element.getBoundingClientRect();
@@ -653,11 +675,25 @@ class DoubaoAutomation {
     return { alreadyLoggedIn: false, opened: Boolean(opened) };
   }
 
+  // 会话页就绪等待：导航后不再死板 sleep，输入框或上传控件一出现就继续（超时兜底静默放行，
+  // 后续 attachFile/enterPrompt 各自的等待会兜住真正没就绪的情况）
+  async waitForChatReady(maxWaitMs = 5000, probe = pageChatInputReady) {
+    await waitFor(() => runInPage(this.webContents, probe).catch(() => false), {
+      timeout: maxWaitMs,
+      interval: 250,
+      isCancelled: this.isCancelled
+    }).catch((error) => {
+      if (error?.code === 'CANCELLED') throw error;
+    });
+  }
+
   async freshConversation() {
     this.onProgress('正在创建新对话');
     const clicked = await runInPage(this.webContents, clickNewConversation).catch(() => false);
     if (clicked) {
-      await sleep(1400);
+      await this.waitForChatReady(5000, pageNewConversationReady);
+      // 视图切换后留一小段稳定时间，避免附件落到即将被替换的旧 DOM 上（原来固定等 1400ms）
+      await sleep(800);
       return;
     }
     await this.window.loadURL(DOUBAO_CHAT_URL);
@@ -666,7 +702,7 @@ class DoubaoAutomation {
       isCancelled: this.isCancelled,
       message: '豆包页面加载超时'
     });
-    await sleep(1000);
+    await this.waitForChatReady();
   }
 
   async openConversation(conversationId) {
@@ -679,7 +715,7 @@ class DoubaoAutomation {
       isCancelled: this.isCancelled,
       message: '豆包页面加载超时'
     });
-    await sleep(1200);
+    await this.waitForChatReady();
     const landedUrl = await runInPage(this.webContents, () => location.href).catch(() => '');
     return conversationIdFromUrl(landedUrl) === conversationId;
   }
@@ -719,7 +755,7 @@ class DoubaoAutomation {
       return false;
     }, {
       timeout: 20_000,
-      interval: 650,
+      interval: 400,
       isCancelled: this.isCancelled,
       message: '没有找到豆包的图片上传控件；请确认当前是普通对话页面并刷新重试'
     });
@@ -733,7 +769,10 @@ class DoubaoAutomation {
       files: [filePath],
       nodeId
     });
+  }
 
+  // 上传预览等待独立出来：设置文件后 attachFile 立即返回，调用方可以先填提示词再等上传完成
+  async waitForUploadPreview() {
     await waitFor(async () => {
       const status = await runInPage(this.webContents, () => {
         const input = document.querySelector('input[data-watermark-lab-upload="1"]');
@@ -747,11 +786,11 @@ class DoubaoAutomation {
       return status;
     }, {
       timeout: 20_000,
-      interval: 600,
+      interval: 400,
       isCancelled: this.isCancelled,
       message: '图片已选择，但豆包没有显示上传预览'
     });
-    await sleep(1000);
+    await sleep(400);
   }
 
   startNetworkCapture(excludedUrls) {
@@ -945,6 +984,8 @@ class DoubaoAutomation {
     if (!login.loggedIn) throw new Error('豆包登录状态已失效，请重新登录后继续');
 
     await this.attachFile(filePath);
+    // 上传完成后再填提示词：实测豆包在传图期间向输入框写入文字可能触发重渲染、冲掉未完成的附件
+    await this.waitForUploadPreview();
     await this.waitForVerificationIfNeeded();
     await runInPage(this.webContents, markExistingImages);
     const baseline = await runInPage(this.webContents, pageImageSnapshot);

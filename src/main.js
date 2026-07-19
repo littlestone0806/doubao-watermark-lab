@@ -588,6 +588,8 @@ async function acquireBatchWindows(count, { show }) {
       auxWorkerWindows.push(window);
     }
     busyWindows.add(window);
+    // 记录原始标题，任务期间的进度标题在批次结束后还原
+    if (!window.__baseTitle) window.__baseTitle = window.getTitle();
     windows.push(window);
   }
   if (show) {
@@ -686,7 +688,11 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     show: settings.showBrowserWindow
   });
   const browser = windows[0];
-  const releaseWindows = () => windows.forEach((window) => busyWindows.delete(window));
+  const releaseWindows = () => windows.forEach((window) => {
+    busyWindows.delete(window);
+    // 还原任务期间显示进度的窗口标题
+    if (!window.isDestroyed() && window.__baseTitle) window.setTitle(window.__baseTitle);
+  });
 
   try {
     const login = await getLoginStatus();
@@ -735,7 +741,13 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
       isCancelled: () => cancelRef.value,
       // 信号值大于本任务基线，说明有任务完成了安全验证：本任务也可能已被波及，整任务重启
       shouldRestart: () => verificationEpoch.value > epochRef.value,
-      onProgress: (message) => batchEvent({ type: 'job-progress', ...jobBase, message }),
+      // 进度同时打到豆包窗口标题：开着调试窗口时能直接看到当前进行到哪一步，不再像卡住
+      onProgress: (message) => {
+        batchEvent({ type: 'job-progress', ...jobBase, message });
+        if (workerWindow && !workerWindow.isDestroyed()) {
+          workerWindow.setTitle(`${message} · 水印清理工作台`);
+        }
+      },
       onVerificationRequired: () => {
         const persistentSession = session.fromPartition(DOUBAO_PARTITION);
         const doubaoWindows = BrowserWindow.getAllWindows().filter((window) =>
@@ -799,7 +811,12 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
           electronSession: workerWindow.webContents.session,
           nativeImage,
           preferOriginal: settings.preferOriginal,
-          onProgress: (message) => batchEvent({ type: 'job-progress', ...jobBase, message })
+          onProgress: (message) => {
+            batchEvent({ type: 'job-progress', ...jobBase, message });
+            if (workerWindow && !workerWindow.isDestroyed()) {
+              workerWindow.setTitle(`${message} · 水印清理工作台`);
+            }
+          }
         });
       } catch (downloadError) {
         batchEvent({
