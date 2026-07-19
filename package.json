@@ -46,10 +46,12 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName}-${version}-${os}-${arch}-setup.${ext}"
+      "artifactName": "doubao-watermark-lab-${version}-${os}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
     },
     "portable": {
-      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
+      "artifactName": "doubao-watermark-lab-${version}-${os}-${arch}-portable.${ext}"
     },
     "linux": {
       "icon": "src/assets/app-icon.png",
@@ -58,7 +60,7 @@
       ],
       "category": "Graphics"
     },
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+    "artifactName": "doubao-watermark-lab-${version}-${os}-${arch}.${ext}"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"

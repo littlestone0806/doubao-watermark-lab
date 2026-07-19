@@ -174,8 +174,6 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 
 .topbar button,
 .topbar .status-pill { -webkit-app-region: no-drag; }
-/* Windows 无边框：右上角留出系统最小化/最大化/关闭按钮的位置 */
-body.platform-win32 .topbar { padding-right: 152px; }
 .brand-block,
 .login-cluster { display: flex; align-items: center; }
 .brand-block { gap: 14px; }
