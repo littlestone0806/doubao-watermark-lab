@@ -982,6 +982,16 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
           mainWindow.focus();
         }
       });
+      // 系统通知被拦截（macOS 未授权；开发模式下身份是 Electron 必然被拒）时兜底：
+      // mac 弹跳 Dock 图标，Windows 闪烁任务栏按钮，保证用户离开时不至于完全没信号
+      notification.on('failed', () => {
+        if (process.platform === 'darwin') {
+          app.dock?.bounce('informational');
+        } else if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.flashFrame(true);
+          mainWindow.once('focus', () => mainWindow.flashFrame(false));
+        }
+      });
       notification.show();
     }
     batchEvent({
