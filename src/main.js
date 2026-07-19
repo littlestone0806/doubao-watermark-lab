@@ -780,12 +780,30 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     if (taskConversationId) inUseConversations.add(taskConversationId);
     let paddedUpload = null;
     try {
-      if (settings.addPaddingBeforeUpload && settings.cropMode !== 'never') {
+      const promptText = runtime.prompt || buildPrompt(settings);
+      // 第一轮：原图直发（不加隔离带、不做任何加工），尝试从接口拦截无水印原图；
+      // 命中即不裁切直接导出
+      const firstPass = await automation.processImage({
+        filePath: file.path,
+        prompt: promptText,
+        // 每个任务独占一个会话：有历史会话先接回（接回失败 processImage 内会自动开新对话），
+        // 没有历史会话的一律开新对话，避免多张图串进同一会话、记录的会话 ID 互相覆盖
+        newConversation: true,
+        conversationId: taskConversationId,
+        imageWaitSeconds: settings.imageWaitSeconds
+      });
+      let candidates = firstPass.candidates;
+      let conversationId = firstPass.conversationId;
+      let uploadPath = file.path;
+      // 降级：接口没拦截到无水印原图时，加临时隔离带在同会话重发一次，回到白边裁切管线。
+      // （第一轮无隔离带，生成图的 AI 标识落在画面内无法干净裁除，所以必须带隔离带重发；
+      //   用户主动关闭隔离带/裁切设置时则跳过重发，直接沿用第一轮候选）
+      if (!firstPass.apiRawHit && settings.addPaddingBeforeUpload && settings.cropMode !== 'never') {
         const edgeName = settings.cropEdge === 'bottom' ? '底部' : '顶部';
         batchEvent({
           type: 'job-progress',
           ...jobBase,
-          message: `正在给原图${edgeName}添加 ${settings.cropPercent}% 临时空白带`
+          message: `未能拦截到无水印原图，改用隔离带方案：给原图${edgeName}添加 ${settings.cropPercent}% 临时空白带后重发`
         });
         paddedUpload = await preparePaddedUpload({
           sourcePath: file.path,
@@ -794,17 +812,17 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
           percent: settings.cropPercent,
           edge: settings.cropEdge
         });
+        uploadPath = paddedUpload.path;
+        const secondPass = await automation.processImage({
+          filePath: uploadPath,
+          prompt: promptText,
+          newConversation: true,
+          conversationId: conversationId || taskConversationId,
+          imageWaitSeconds: settings.imageWaitSeconds
+        });
+        candidates = secondPass.candidates;
+        conversationId = secondPass.conversationId || conversationId;
       }
-      const uploadPath = paddedUpload?.path || file.path;
-      const { candidates, conversationId } = await automation.processImage({
-        filePath: uploadPath,
-        prompt: runtime.prompt || buildPrompt(settings),
-        // 每个任务独占一个会话：有历史会话先接回（接回失败 processImage 内会自动开新对话），
-        // 没有历史会话的一律开新对话，避免多张图串进同一会话、记录的会话 ID 互相覆盖
-        newConversation: true,
-        conversationId: taskConversationId,
-        imageWaitSeconds: settings.imageWaitSeconds
-      });
       let candidate;
       try {
         candidate = await downloadBestImage({

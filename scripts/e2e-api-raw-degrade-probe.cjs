@@ -1,17 +1,17 @@
 'use strict';
 
 /*
- * 端到端实测：无水印原图直取（api-raw，集成自 doubao-no-watermark）。
- * 流程：启动应用（远程调试）→ 检查登录 → 加入 1 张测试图 → 开始批量处理 →
- *       全程收集该任务的进度消息 → 等待完成。
- * 断言（默认直取链路：原图直发、不加隔离带、不裁切）：
+ * 端到端实测：api-raw 拦截失败时的「隔离带降级重发」链路。
+ * 通过环境变量 DWL_DISABLE_API_RAW=1 关掉接口拦截（测试钩子），
+ * 强制任务走「原图直发未命中 → 加临时隔离带在同会话重发 → 白边裁切」的降级管线。
+ * 断言：
  *   1. 任务完成且有输出文件；
- *   2. 处理过程中出现过「已拦截到豆包返回的无水印原图」进度消息，
- *      且完成记录的 captureSource 为 api-raw（证明接口拦截命中而非回退旧管线）；
- *   3. 输出文件真实存在于磁盘；
- *   4. 未走隔离带（removedUploadPadding 为 false）且未做任何裁切（cropped 为 false）。
- * 注意：api-raw 抓不到时任务会静默降级（加隔离带重发）并成功，所以「任务成功」
- *       本身不算数，必须同时命中断言 2、4 才算通过。
+ *   2. 降级重发确实发生：removedUploadPadding 为 true 且 cropped 为 true
+ *      （隔离带只可能在降级分支创建，这是比瞬时进度文字更可靠的持久证据）；
+ *   3. 完成记录 captureSource 不是 api-raw（确实没走直取）；
+ *   4. 输出文件真实存在于磁盘。
+ * 注：降级提示文字「未能拦截到无水印原图…」是瞬时进度，可能被后续进度快速覆盖，
+ *     仅作参考记录，不作为硬断言。
  */
 
 const { spawn } = require('node:child_process');
@@ -19,8 +19,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const CWD = path.resolve(__dirname, '..');
-const IMAGE = path.join(CWD, 'e2e-test-images', 'e2e-1.png');
-const PORT = 9337;
+const IMAGE = path.join(CWD, 'e2e-test-images', 'e2e-2.png');
+const PORT = 9338;
 const ELECTRON = path.join(CWD, 'node_modules', '.bin', 'electron');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,11 +87,12 @@ async function waitForDebugger(timeoutMs) {
 }
 
 async function main() {
-  log('启动应用（远程调试端口 9337）…');
+  log('启动应用（DWL_DISABLE_API_RAW=1，强制走降级链路）…');
   const child = spawn(ELECTRON, ['.', `--remote-debugging-port=${PORT}`], {
     cwd: CWD,
     detached: true,
-    stdio: 'ignore'
+    stdio: 'ignore',
+    env: { ...process.env, DWL_DISABLE_API_RAW: '1' }
   });
   const killApp = () => {
     try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ }
@@ -126,14 +127,14 @@ async function main() {
       await addFiles(await watermarkLab.validatePaths(${JSON.stringify([IMAGE])}));
       return state.files.length;
     })()`);
-    log('已加入 1 张测试图并开始批量处理…');
+    log('已加入 1 张测试图并开始批量处理（预期：直取未命中 → 隔离带重发）…');
     await cdp.evaluate('document.querySelector("#startButton").click(); "started"');
 
     const messages = new Set();
     const started = Date.now();
     let final = null;
-    while (Date.now() - started < 240_000) {
-      await sleep(2000);
+    while (Date.now() - started < 250_000) {
+      await sleep(800);
       const file = await cdp.evaluate(`(() => {
         const f = state.files.find((file) => file.path === ${JSON.stringify(IMAGE)});
         return f ? {
@@ -161,16 +162,12 @@ async function main() {
     report.final = final;
     log(`最终状态: ${JSON.stringify(final)}`);
 
-    const apiRawHit = [...messages].some((m) => m.includes('已拦截到豆包返回的无水印原图'))
-      && final?.captureSource === 'api-raw';
+    const degradeHintSeen = [...messages].some((m) => m.includes('未能拦截到无水印原图'));
+    report.notes.push(`降级提示文字${degradeHintSeen ? '已' : '未'}在轮询中捕获（瞬时消息，仅供参考）`);
     report.assertions['任务完成'] = final?.status === 'complete' && Boolean(final?.outputPath);
-    report.assertions['api-raw 接口拦截命中（非降级旧管线）'] = apiRawHit;
+    report.assertions['降级重发已发生（隔离带上传并被裁掉）'] = final?.removedUploadPadding === true && final?.cropped === true;
+    report.assertions['未走 api-raw 直取'] = final?.captureSource !== 'api-raw';
     report.assertions['输出文件存在于磁盘'] = Boolean(final?.outputPath && fs.existsSync(final.outputPath));
-    report.assertions['原图直发未加隔离带'] = final?.removedUploadPadding === false;
-    report.assertions['直取原图未做任何裁切'] = final?.cropped === false;
-    if (!apiRawHit) {
-      report.notes.push('任务可能走了降级管线（api-raw 未命中）：检查 CDP getResponseBody 是否拿到了 SSE 响应体');
-    }
   } finally {
     if (cdp && selectionSnapshot) {
       try {

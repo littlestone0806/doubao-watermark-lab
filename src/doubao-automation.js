@@ -872,6 +872,10 @@ class DoubaoAutomation {
   // chat/completion 的 SSE 响应体，提取服务端直接返回的 image_ori_raw 无水印原图地址。
   // 不注入页面、不改动页面任何行为；抓不到时调用方回退原有白边裁切管线。
   startApiRawCapture() {
+    // 测试钩子：e2e 需要强制走「降级重发」链路时，用 DWL_DISABLE_API_RAW=1 关掉接口拦截
+    if (process.env.DWL_DISABLE_API_RAW === '1') {
+      return { candidates: new Map(), pendingCount: () => 0, stop() {} };
+    }
     const found = new Map();
     const pending = new Set();
     const debuggerApi = this.webContents.debugger;
@@ -1104,7 +1108,9 @@ class DoubaoAutomation {
           noImageGraceMs: imageWaitSeconds > 0 ? imageWaitSeconds * 1000 : DEFAULT_NO_IMAGE_GRACE_MS,
           apiRawCapture
         });
-        return { candidates, conversationId: capturedConversationId };
+        // apiRawHit 供调用方决定是否需要「加隔离带重发」的降级轮
+        const apiRawHit = candidates.some((candidate) => candidate.source === 'api-raw');
+        return { candidates, conversationId: capturedConversationId, apiRawHit };
       } catch (error) {
         if (capturedConversationId && !error.conversationId) error.conversationId = capturedConversationId;
         throw error;
