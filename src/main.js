@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, session } = require('electron');
 const crypto = require('node:crypto');
 const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
@@ -959,13 +959,38 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
   } finally {
     releaseWindows();
     const cancelled = cancelRef.value;
+    const completedCount = results.filter((item) => item.outputPath && !item.error).length;
+    const failedCount = results.filter((item) => item.error).length;
+    // 长跑任务切走窗口时，结束后弹系统通知叫用户回来（主窗口聚焦时不打扰）
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+      const isManual = mode === 'manual';
+      const title = cancelled
+        ? (isManual ? '局部重绘已停止' : '批量处理已停止')
+        : failedCount > 0
+          ? (isManual ? '局部重绘失败' : '批量处理完成，但有失败')
+          : (isManual ? '局部重绘完成' : '批量处理全部完成');
+      const body = cancelled
+        ? `已停止，完成 ${completedCount}/${files.length} 张`
+        : failedCount > 0
+          ? `成功 ${completedCount} 张，失败 ${failedCount} 张，点击查看详情`
+          : `${completedCount} 张图片已保存到输出目录`;
+      const notification = new Notification({ title, body });
+      notification.on('click', () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      });
+      notification.show();
+    }
     batchEvent({
       type: 'batch-complete',
       batchId,
       cancelled,
       total: files.length,
-      completed: results.filter((item) => item.outputPath && !item.error).length,
-      failed: results.filter((item) => item.error).length,
+      completed: completedCount,
+      failed: failedCount,
       outputDirectory: settings.outputDirectory,
       mode,
       path: runtime.eventPath || null
