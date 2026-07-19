@@ -6,3 +6,15 @@ release/
 *.internal.md
 .qc-demo/
 harmony-poc/
+
+# 鸿蒙工程模板的构建产物与本机文件（模板源码本身入库）
+ohos/**/build/
+ohos/**/.hvigor/
+ohos/**/.cxx/
+ohos/**/.idea/
+ohos/**/.preview/
+ohos/**/local.properties
+ohos/**/oh_modules/
+ohos/oh_modules/
+# 由 scripts/prepare-ohos-libs.cjs 从 ohos/prebuilt/libelectron.so.zip 解压恢复
+ohos/electron/libs/arm64-v8a/libelectron.so

@@ -14,7 +14,7 @@
     "hvigorwPath": "/Applications/DevEco-Studio.app/Contents/tools/hvigor/bin",
     "ohpmPath": "/Applications/DevEco-Studio.app/Contents/tools/ohpm/bin",
     "sdkPath": "/Applications/DevEco-Studio.app/Contents/sdk",
-    "ohosHapPath": "/Users/stone/Desktop/ohos_hap",
+    "ohosHapPath": "./ohos",
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET"

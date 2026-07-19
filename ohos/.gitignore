@@ -1,0 +1,18 @@
+# 本仓库将鸿蒙模板完整入库（含 electron/libs 预编译库与 web_engine resfile 运行时资源），
+# 便于 clone 后直接 npm run dist:ohos 构建；以下仅忽略构建产物与本机文件。
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/hvigorw
+/electron/oh_modules
+/web_engine/BuildProfile.ets
+/web_engine/oh_modules
+/dependencies
