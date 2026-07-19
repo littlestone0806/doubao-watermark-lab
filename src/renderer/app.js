@@ -349,7 +349,11 @@ function syncActionState() {
   syncProcessingControls();
   elements.cancelButton.classList.toggle('is-hidden', !state.running);
   elements.startButton.classList.toggle('is-hidden', state.running);
-  elements.exportZipButton.disabled = state.running || !state.files.some((file) => file.status === 'complete' && file.outputPath && file.selected !== false);
+  const canExport = !state.running && state.files.some((file) => file.status === 'complete' && file.outputPath && file.selected !== false);
+  elements.exportZipButton.disabled = !canExport;
+  // 无可导出项时与"打开输出目录"同为幽灵样式；有可导出项时提为次要按钮提示可用
+  elements.exportZipButton.classList.toggle('secondary', canExport);
+  elements.exportZipButton.classList.toggle('ghost', !canExport);
   elements.emptyState.classList.toggle('is-hidden', state.files.length > 0);
   elements.queueListToolbar.classList.toggle('is-hidden', state.files.length === 0);
 }
