@@ -1,6 +1,6 @@
 # 水印清理工作台
 
-基于 **Electron + 豆包网页版**的批量图片去水印桌面工具，支持 macOS 与 Windows。
+基于 **Electron + 豆包网页版**的批量图片去水印桌面工具，支持 macOS、Windows 与鸿蒙（HarmonyOS NEXT）。
 自动化运行在应用内嵌的 Chromium 窗口中，**无需安装 Chrome 或任何浏览器**。
 
 ![水印清理工作台主界面](docs/screenshot-main.png)
@@ -38,6 +38,7 @@
 | Windows x64 | `*-win-x64-setup.exe` | 安装版（安装向导中可自选安装目录），SmartScreen 提示时点"更多信息 → 仍要运行" |
 | Windows x64 | `*-win-x64-portable.exe` | 便携版，免安装直接运行；发现新版本时会自动下载新版便携包到当前 exe 所在目录；如被"智能应用控制"拦截见下方说明 |
 | Windows ARM64 | `*-win-arm64-setup.exe` / `*-win-arm64-portable.exe` | Surface Pro X 等 ARM 设备 |
+| 鸿蒙 HarmonyOS NEXT | `*-ohos-arm64.hap` | 未签名安装包，需用 DevEco Studio 自动签名后安装（华为开发者账号免费注册即可），支持设备见下方说明 |
 
 **macOS "已损坏"提示说明**：应用未做 Apple 签名，浏览器下载的文件会被 Gatekeeper 加上隔离属性，新版 macOS 对此直接报"已损坏"（文件本身并没有坏）。把应用拖入「应用程序」文件夹后，在终端执行一次：
 
@@ -46,6 +47,15 @@ xattr -cr /Applications/水印清理工作台.app
 ```
 
 之后即可正常双击打开（也可以右键 → 打开）。该命令仅移除这个应用的下载隔离标记，不影响系统其他设置。
+
+**鸿蒙版支持设备与安装说明**：鸿蒙版基于 OpenHarmony 官方适配的 Electron（`@electron-ohos/electron-builder`）构建，要求 **HarmonyOS NEXT（HarmonyOS 5.0 及以上）的 ARM64 设备**，例如已升级 HarmonyOS NEXT 的 Mate 60 / Mate 70 系列、Pura 70 系列、Mate X5 / X6、MatePad Pro 等机型；不支持 HarmonyOS 4 及更早版本（安卓内核），也不支持 x86 模拟器。Release 中的 `.hap` 为未签名包，鸿蒙设备只允许安装已签名的应用，签名只需一次（免费）：
+
+1. 在电脑上安装 [DevEco Studio](https://developer.huawei.com/consumer/cn/deveco-studio/)，注册并登录华为开发者账号（个人账号免费）。
+2. 用 DevEco Studio 打开本仓库 `dist/ohos-arm64-unpacked/ohos_hap` 工程（或自行 `npm run dist:ohos` 重新生成）。
+3. 进入 **File → Project Structure → Signing Configs**，勾选"Automatically generate signature"自动签名。
+4. 点击 **Run** 直接把应用装到已连接的设备（会自动完成签名并安装）；也可以在 Build 菜单构建出已签名 hap 后用 `hdc install` 安装。
+
+鸿蒙版功能与桌面版一致（批量队列、多线程、原图直取、降级裁切、涂抹重绘、批量导出、系统通知等均可用）；受平台能力限制，应用内自动更新与 Dock 图标换色在鸿蒙上不启用，新版本请在 Release 页下载后按上述步骤重新签名安装。
 
 **Windows "智能应用控制已阻止可能不安全的应用"说明**：部分全新安装的 Windows 11 默认开启"智能应用控制"（Smart App Control），它会直接拦截没有代码签名证书的应用，且**没有"仍要运行"选项**。本项目未购买签名证书（拦截不代表软件有问题，源码全部公开，不放心可自行从源码构建）。如遇此拦截：打开 **Windows 安全中心 → 应用和浏览器控制 → 智能应用控制设置 → 选择"关闭"**，之后即可正常运行。注意该开关是单向的，关闭后无法再开启（除非重置系统），关闭不影响杀毒等其他防护。普通 SmartScreen 拦截不受此限，点"更多信息 → 仍要运行"即可。
 
@@ -81,15 +91,16 @@ npm start
 ```bash
 npm run dist                      # 当前平台（macOS：dmg + zip）
 npx electron-builder --win --x64  # 在 macOS 上交叉打包 Windows x64
+npm run dist:ohos                 # 鸿蒙 HAP（需本机已装 DevEco Studio，工程模板路径见 electron-builder.ohos.json）
 ```
 
-产物输出到 `dist/`。未配置代码签名证书时会跳过签名（不影响使用，首次打开按上表提示操作）。
+产物输出到 `dist/`。未配置代码签名证书时会跳过签名（不影响使用，首次打开按上表提示操作）；鸿蒙包会用 DevEco 自动签名的调试证书签名（仅已注册设备可装），需要分发给他人时请参考上方鸿蒙说明重新签名。
 
 ## 测试
 
 ```bash
 npm run check   # 全部源码语法检查
-npm test        # 单元测试（test/ 目录，51 个用例）
+npm test        # 单元测试（test/ 目录，59 个用例）
 ```
 
 `scripts/` 下是端到端实测脚本，通过 Chrome DevTools Protocol 驱动真实应用与已登录的豆包页面，覆盖会话接回、并行停止、无图报错等场景。运行前需要本机已登录豆包；个别探测脚本需要通过环境变量传入测试会话，例如：

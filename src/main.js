@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, shell, session, systemPreferences, Tray } = require('electron');
 const crypto = require('node:crypto');
 const fsSync = require('node:fs');
 const fs = require('node:fs/promises');
@@ -21,12 +21,16 @@ const { writeZipFile } = require('./zip-writer');
 const DOUBAO_PARTITION = 'persist:watermark-lab-doubao';
 const APP_ICON_PATH = path.join(__dirname, 'assets', 'app-icon.png');
 const APP_DISPLAY_NAME = '水印清理工作台';
+// 鸿蒙（OpenHarmony）平台标记：窗口框架、托盘、更新、默认目录等按平台差异走专门分支
+const IS_OHOS = process.platform === 'openharmony';
 // Dock 悬停与系统各处显示应用名（开发模式下默认显示 Electron）
 app.setName(APP_DISPLAY_NAME);
 // setName 会改变 userData 默认位置；若旧目录已存在则钉回去，避免设置、队列与豆包登录态丢失
-const LEGACY_USER_DATA = path.join(app.getPath('appData'), 'doubao-watermark-lab');
+// （鸿蒙上 appData 概念不存在，getPath 可能抛异常，做好防御）
+let LEGACY_USER_DATA = null;
+try { LEGACY_USER_DATA = path.join(app.getPath('appData'), 'doubao-watermark-lab'); } catch { /* 平台无 appData */ }
 try {
-  if (fsSync.existsSync(LEGACY_USER_DATA)) app.setPath('userData', LEGACY_USER_DATA);
+  if (LEGACY_USER_DATA && fsSync.existsSync(LEGACY_USER_DATA)) app.setPath('userData', LEGACY_USER_DATA);
 } catch { /* 保留默认路径 */ }
 const AUTOMATION_SAFETY_VERSION = 1;
 const CROP_STRATEGY_VERSION = 4;
@@ -70,6 +74,8 @@ const DEFAULT_SETTINGS = {
 
 let mainWindow;
 let doubaoWindow;
+// 鸿蒙托盘（窗口显隐的系统前置条件，需长期持有）
+let ohosTray = null;
 let previewWindow;
 let manualWindow;
 let advancedWindow;
@@ -97,10 +103,18 @@ function queueRecordsPath() {
   return path.join(app.getPath('userData'), 'queue-records.json');
 }
 
+// 鸿蒙没有公共图片目录的访问权限（需 ACL 申请），默认输出到应用沙箱（文件管理器可见）；
+// mac/win 默认输出到图片目录
+function defaultOutputDirectory() {
+  return IS_OHOS
+    ? path.join(app.getPath('userData'), 'Watermark Lab')
+    : path.join(app.getPath('pictures'), 'Watermark Lab');
+}
+
 async function loadSettings() {
   const defaults = {
     ...DEFAULT_SETTINGS,
-    outputDirectory: path.join(app.getPath('pictures'), 'Watermark Lab')
+    outputDirectory: defaultOutputDirectory()
   };
   try {
     const saved = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
@@ -123,7 +137,7 @@ function sanitizeSettings(input = {}) {
   return {
     outputDirectory: typeof input.outputDirectory === 'string' && input.outputDirectory
       ? path.resolve(input.outputDirectory)
-      : path.join(app.getPath('pictures'), 'Watermark Lab'),
+      : defaultOutputDirectory(),
     prompt: typeof input.prompt === 'string' && input.prompt.trim() ? input.prompt.trim().slice(0, 4000) : DEFAULT_PROMPT,
     manualEditPrompt: typeof input.manualEditPrompt === 'string' && input.manualEditPrompt.trim()
       ? input.manualEditPrompt.trim().slice(0, 4000)
@@ -322,8 +336,9 @@ function createMainWindow() {
     minHeight: 630,
     backgroundColor: '#f5f4ef',
     icon: APP_ICON_PATH,
-    // Windows 无边框：隐藏系统标题栏，用 titleBarOverlay 保留原生最小化/最大化/关闭（含 Win11 贴靠布局）
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    // Windows 无边框：隐藏系统标题栏，用 titleBarOverlay 保留原生最小化/最大化/关闭（含 Win11 贴靠布局）；
+    // 鸿蒙无边框窗口没有三键（无法关闭/最小化），必须用系统默认边框
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : (IS_OHOS ? 'default' : 'hidden'),
     ...(process.platform === 'win32' ? { titleBarOverlay: { color: '#eef3f0', symbolColor: '#33423b', height: 40 } } : {}),
     title: '水印清理工作台',
     webPreferences: {
@@ -1343,7 +1358,7 @@ function registerIpc() {
   ipcMain.handle('output:select', async (_event, currentDirectory) => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: '选择输出文件夹',
-      defaultPath: currentDirectory || app.getPath('pictures'),
+      defaultPath: currentDirectory || (IS_OHOS ? app.getPath('userData') : app.getPath('pictures')),
       properties: ['openDirectory', 'createDirectory']
     });
     return result.canceled ? null : result.filePaths[0];
@@ -1550,6 +1565,8 @@ async function checkPortableUpdate() {
 
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
+  // 鸿蒙暂无更新渠道（后续走应用市场），不做 GitHub 更新检查
+  if (IS_OHOS) return;
   if (process.platform === 'darwin') {
     const check = () => checkMacUpdate().catch(() => {});
     setTimeout(check, 6_000);
@@ -1600,6 +1617,22 @@ app.whenReady().then(async () => {
   // 应用不使用系统菜单栏（macOS 顶部菜单与 Windows 窗口菜单一并移除）
   Menu.setApplicationMenu(null);
   registerEditShortcuts();
+  // 鸿蒙系统限制：窗口的显示/隐藏与托盘强绑定，创建窗口前必须先有托盘，
+  // 否则工作窗口 hide/show（隐藏处理、验证时弹出）会失效
+  if (IS_OHOS) {
+    try {
+      ohosTray = new Tray(nativeImage.createFromPath(APP_ICON_PATH));
+      ohosTray.setToolTip(APP_DISPLAY_NAME);
+      ohosTray.setContextMenu(Menu.buildFromTemplate([
+        { label: '打开主窗口', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); } },
+        { label: '退出', click: () => app.quit() }
+      ]));
+    } catch (error) {
+      console.warn(`鸿蒙托盘创建失败（窗口显隐可能受影响）：${error?.message || error}`);
+    }
+    // 申请剪贴板读取权限（截图粘贴入队依赖；系统弹窗只出现一次）
+    systemPreferences.requestSystemPermission?.('pasteboard')?.catch?.(() => {});
+  }
   configureDoubaoSession();
   registerIpc();
   createMainWindow();
@@ -1619,6 +1652,13 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   app.quit();
+});
+
+app.on('will-quit', () => {
+  if (ohosTray) {
+    try { ohosTray.destroy(); } catch { /* 已销毁 */ }
+    ohosTray = null;
+  }
 });
 
 let appQuitting = false;

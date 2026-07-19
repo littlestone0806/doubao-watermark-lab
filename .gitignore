@@ -5,3 +5,4 @@ release/
 *.log
 *.internal.md
 .qc-demo/
+harmony-poc/

@@ -11,11 +11,13 @@
     "check": "node --check src/main.js && node --check src/preload.js && node --check src/preview-preload.js && node --check src/manual-preload.js && node --check src/advanced-preload.js && node --check src/doubao-automation.js && node --check src/update-check.js && node --check src/qc-check.js && node --check src/theme-icon.js && node --check src/image-pipeline.js && node --check src/zip-writer.js && node --check src/renderer/app.js && node --check src/renderer/preview-window.js && node --check src/renderer/manual-window.js && node --check src/renderer/advanced-window.js",
     "test": "node --test \"test/*.test.js\"",
     "postinstall": "node scripts/fix-electron-name.cjs",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "dist:ohos": "JAVA_HOME=\"/Applications/DevEco-Studio.app/Contents/jbr/Contents/Home\" electron-builder-ohos --ohos -c electron-builder.ohos.json"
   },
   "devDependencies": {
     "electron": "43.1.1",
-    "electron-builder": "26.15.3"
+    "electron-builder": "26.15.3",
+    "@electron-ohos/electron-builder": "^26.8.5"
   },
   "build": {
     "appId": "com.watermarklab.doubao",
