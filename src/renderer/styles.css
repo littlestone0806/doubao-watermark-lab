@@ -408,7 +408,7 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .output-hint { margin-top: 7px; color: var(--faint); font-size: 9px; }
 
 .settings-actions { flex: none; display: flex; align-items: center; gap: 9px; padding: 13px 20px 16px; border-top: 1px solid var(--line-soft); }
-.settings-actions .button.ghost { flex: none; padding-inline: 11px; }
+.settings-actions .button.ghost, .settings-actions .button.secondary { flex: none; padding-inline: 11px; }
 .settings-actions .button.primary { min-width: 0; flex: 1; }
 .settings-actions .button.danger { flex: 1; }
 .appearance-popover-anchor { position: relative; }
