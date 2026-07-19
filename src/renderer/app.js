@@ -776,6 +776,40 @@ elements.dropZone.addEventListener('drop', async (event) => {
   addFiles(await api.validatePaths(paths));
 });
 
+// 剪贴板粘贴入队：截图/复制的图片直接 Cmd/Ctrl+V 进队列
+// 剪贴板里是真实文件（如 Finder 中复制的图片）时优先用原路径，否则把字节落盘到收件箱
+document.addEventListener('paste', async (event) => {
+  if (state.running) return;
+  if (event.target?.closest?.('input, textarea, [contenteditable="true"]')) return;
+  const imageItem = [...(event.clipboardData?.items || [])]
+    .find((item) => item.kind === 'file' && item.type.startsWith('image/'));
+  if (!imageItem) return;
+  const blob = imageItem.getAsFile();
+  if (!blob) return;
+  event.preventDefault();
+  try {
+    const realPath = api.pathForFile(blob);
+    if (realPath) {
+      const valid = await api.validatePaths([realPath]);
+      if (valid.length) {
+        await addFiles(valid);
+        return;
+      }
+    }
+  } catch { /* 非真实文件，走落盘 */ }
+  try {
+    const file = await api.saveClipboardImage(await blob.arrayBuffer(), blob.type);
+    if (file) {
+      await addFiles([file]);
+      toast('已从剪贴板添加图片');
+    } else {
+      toast('剪贴板图片保存失败', 'error');
+    }
+  } catch (error) {
+    toast(error.message || String(error), 'error');
+  }
+});
+
 elements.clearButton.addEventListener('click', () => {
   state.files = [];
   renderQueue();

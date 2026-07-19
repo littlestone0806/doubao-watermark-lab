@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('watermarkLab', {
   getLoginStatus: () => ipcRenderer.invoke('login:status'),
   selectImages: () => ipcRenderer.invoke('files:select'),
   validatePaths: (paths) => ipcRenderer.invoke('files:validate', paths),
+  saveClipboardImage: (buffer, mimeType) => ipcRenderer.invoke('files:save-clipboard', { buffer, mimeType }),
   getImagePreview: (targetPath, maxSize) => ipcRenderer.invoke('image:preview', targetPath, maxSize),
   openAdvancedSettings: () => ipcRenderer.invoke('advanced:open'),
   onSettingsUpdated: (callback) => {

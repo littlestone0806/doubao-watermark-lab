@@ -1248,6 +1248,30 @@ function registerIpc() {
     return result.canceled ? [] : validateImagePaths(result.filePaths);
   });
   ipcMain.handle('files:validate', (_event, paths) => validateImagePaths(paths));
+  // 剪贴板粘贴入队：把渲染进程传来的图片字节落盘到收件箱，再走统一的校验/缩略图管线
+  ipcMain.handle('files:save-clipboard', async (_event, payload) => {
+    const buffer = Buffer.from(payload?.buffer || []);
+    if (!buffer.length || buffer.length > 80 * 1024 * 1024) return null;
+    const extByMime = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/bmp': '.bmp', 'image/gif': '.gif' };
+    const ext = extByMime[payload?.mimeType] || '.png';
+    const directory = path.join(app.getPath('userData'), 'clipboard-inbox');
+    await fs.mkdir(directory, { recursive: true });
+    const now = new Date();
+    const pad = (value) => String(value).padStart(2, '0');
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+    let filePath = path.join(directory, `剪贴板-${stamp}${ext}`);
+    for (let seq = 2; fsSync.existsSync(filePath); seq += 1) {
+      filePath = path.join(directory, `剪贴板-${stamp}-${seq}${ext}`);
+    }
+    await fs.writeFile(filePath, buffer);
+    // 收件箱只留最近 50 张，避免无限膨胀
+    const inbox = (await fs.readdir(directory)).filter((name) => name.startsWith('剪贴板-')).sort();
+    for (const stale of inbox.slice(0, Math.max(0, inbox.length - 50))) {
+      await fs.rm(path.join(directory, stale), { force: true }).catch(() => {});
+    }
+    const [file] = await validateImagePaths([filePath]);
+    return file || null;
+  });
   ipcMain.handle('image:preview', (_event, targetPath, maxSize) => getImagePreviewData(targetPath, maxSize));
   ipcMain.handle('image:open-preview', (_event, targetPath) => openImagePreviewWindow(targetPath));
   ipcMain.handle('manual:open', (_event, payload) => openManualEditWindow(payload));
