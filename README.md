@@ -92,7 +92,7 @@ npm run dist:ohos                 # 鸿蒙 HAP
 
 仓库 `ohos/` 模板中已内置最近一次发布的应用代码快照（`app.asar`），开箱即用：
 
-1. 安装 DevEco Studio，用其打开仓库根目录的 `ohos/` 工程（等待依赖同步完成）。
+1. 安装 DevEco Studio，用其打开仓库根目录的 `ohos/` 工程（等待依赖同步完成；首次构建会自动从 `ohos/prebuilt/` 解压 144MB 引擎库 `libelectron.so`，只需一次，无需手动操作）。
 2. 进入 **File → Project Structure → Signing Configs**，勾选"Automatically generate signature"自动签名（工程已引用名为 `default` 的签名配置，签名材料生成后即可用；若报 `no signature file`，检查 `ohos/build-profile.json5` 的 `signingConfigs` 是否已有材料）。
 3. 点击 **Run** 装到设备，直接看到完整的水印清理工作台。
 

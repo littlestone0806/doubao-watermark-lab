@@ -35,4 +35,14 @@ for (const key of ['vendor', 'versionCode', 'versionName']) {
 }
 fs.writeFileSync(tplPath, tplApp);
 console.log('[sync-ohos] AppScope 版本信息已同步：', tplApp.match(/versionName:\s*'[^']*'/)[0]);
+
+// 同步应用图标（builder 会用 src/assets/app-icon.png 重新生成各规格图标）
+for (const icon of ['app_icon.png', 'startIcon.png']) {
+  const rel = path.join('AppScope', 'resources', 'base', 'media', icon);
+  const from = path.join(distProject, rel);
+  if (fs.existsSync(from)) {
+    fs.copyFileSync(from, path.join(tplProject, rel));
+    console.log(`[sync-ohos] 图标已同步：${icon}`);
+  }
+}
 console.log('[sync-ohos] 完成。如 app.asar 有变化，请提交仓库让 clone 用户拿到最新快照。');
