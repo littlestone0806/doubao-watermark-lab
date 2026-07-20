@@ -1518,7 +1518,7 @@ function registerEditShortcuts() {
 // macOS：未签名包无法使用 Squirrel 自动安装，走 GitHub API 检查 + 下载 dmg 引导手动替换（半自动更新）
 let macUpdateInProgress = false;
 async function checkMacUpdate() {
-  const { newerVersionFromRelease, pickReleaseAsset } = require('./update-check');
+  const { newerVersionFromRelease, pickReleaseAsset, summarizeReleaseNotes } = require('./update-check');
   const response = await fetch('https://api.github.com/repos/littlestone0806/doubao-watermark-lab/releases/latest', {
     headers: { 'User-Agent': 'watermark-lab-updater', Accept: 'application/vnd.github+json' }
   });
@@ -1527,12 +1527,13 @@ async function checkMacUpdate() {
   const latest = newerVersionFromRelease(release, app.getVersion());
   if (!latest || macUpdateInProgress) return;
   macUpdateInProgress = true;
+  const notes = summarizeReleaseNotes(release.body);
   try {
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: mt('发现新版本', 'Update available'),
       message: mt(`新版本 ${latest} 已发布（当前 ${app.getVersion()}）`, `Version ${latest} is out (current ${app.getVersion()})`),
-      detail: mt('由于应用未做 Apple 签名，macOS 无法自动安装更新。点击“立即下载”将为你下载安装包并打开，拖入「应用程序」替换即可。', 'The app is not Apple-signed, so macOS cannot auto-install updates. Click "Download now" to fetch and open the installer, then drag it into Applications to replace the old version.'),
+      detail: `${notes ? `${notes}\n\n` : ''}${mt('由于应用未做 Apple 签名，macOS 无法自动安装更新。点击“立即下载”将为你下载安装包并打开，拖入「应用程序」替换即可。', 'The app is not Apple-signed, so macOS cannot auto-install updates. Click "Download now" to fetch and open the installer, then drag it into Applications to replace the old version.')}`,
       buttons: [mt('立即下载', 'Download now'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
@@ -1575,7 +1576,7 @@ let portableUpdateInProgress = false;
 async function checkPortableUpdate() {
   const portableExe = process.env.PORTABLE_EXECUTABLE_FILE;
   if (!portableExe || portableUpdateInProgress) return;
-  const { newerVersionFromRelease, pickReleaseAsset, portableAssetPattern } = require('./update-check');
+  const { newerVersionFromRelease, pickReleaseAsset, portableAssetPattern, summarizeReleaseNotes } = require('./update-check');
   const response = await fetch('https://api.github.com/repos/littlestone0806/doubao-watermark-lab/releases/latest', {
     headers: { 'User-Agent': 'watermark-lab-updater', Accept: 'application/vnd.github+json' }
   });
@@ -1586,12 +1587,13 @@ async function checkPortableUpdate() {
   const asset = pickReleaseAsset(release, portableAssetPattern(process.arch));
   if (!asset) return;
   portableUpdateInProgress = true;
+  const notes = summarizeReleaseNotes(release.body);
   try {
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: mt('发现新版本', 'Update available'),
       message: mt(`新版本 ${latest} 已发布（当前 ${app.getVersion()}）`, `Version ${latest} is out (current ${app.getVersion()})`),
-      detail: mt('将下载新版便携包到当前软件所在目录，下载完成后关闭软件、运行新文件即可。', 'The new portable build will be downloaded next to the current app; close the app and run the new file when done.'),
+      detail: `${notes ? `${notes}\n\n` : ''}${mt('将下载新版便携包到当前软件所在目录，下载完成后关闭软件、运行新文件即可。', 'The new portable build will be downloaded next to the current app; close the app and run the new file when done.')}`,
       buttons: [mt('立即下载', 'Download now'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
@@ -1659,11 +1661,17 @@ function setupAutoUpdater() {
   });
   autoUpdater.on('update-downloaded', async (info) => {
     const version = info?.version ? ` ${info.version}` : '';
+    // GitHub 源的 releaseNotes 是 release 正文转成的 HTML，摘要函数内部会先剥标签
+    const { summarizeReleaseNotes } = require('./update-check');
+    const rawNotes = Array.isArray(info?.releaseNotes)
+      ? info.releaseNotes.map((item) => item?.note || '').join('\n')
+      : info?.releaseNotes || '';
+    const notes = summarizeReleaseNotes(rawNotes);
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: mt('更新已就绪', 'Update ready'),
       message: mt(`新版本${version}已下载完成`, `Version${version} has been downloaded`),
-      detail: mt('重启应用后即可使用新版本；选择“稍后”则下次退出时自动安装。', 'Restart to use the new version; choose "Later" to install automatically on next quit.'),
+      detail: `${notes ? `${notes}\n\n` : ''}${mt('重启应用后即可使用新版本；选择“稍后”则下次退出时自动安装。', 'Restart to use the new version; choose "Later" to install automatically on next quit.')}`,
       buttons: [mt('立即重启', 'Restart now'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
