@@ -7,7 +7,7 @@ All automation runs inside the app's embedded Chromium window — **no Chrome or
 
 > Doubao (豆包) is ByteDance's AI assistant. A free Doubao account is required; the app drives its web UI to do the actual image processing. The interface ships in Chinese by default and can be switched to English in one click (Processing settings → Appearance).
 
-![Watermark Lab main window](docs/screenshot-main.png)
+![Watermark Lab main window](docs/screenshot-main-en.png)
 
 ## Features
 
