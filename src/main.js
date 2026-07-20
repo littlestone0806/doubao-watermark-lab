@@ -15,7 +15,7 @@ const {
   preparePaddedUpload,
   saveProcessedImage
 } = require('./image-pipeline');
-const { buildManualEditPrompt, buildPrompt, DEFAULT_PROMPT, MANUAL_EDIT_PROMPT } = require('./prompt');
+const { buildManualEditPrompt, buildPrompt, DEFAULT_PROMPT, DEFAULT_PROMPT_EN, MANUAL_EDIT_PROMPT, MANUAL_EDIT_PROMPT_EN } = require('./prompt');
 const { writeZipFile } = require('./zip-writer');
 
 const DOUBAO_PARTITION = 'persist:watermark-lab-doubao';
@@ -67,8 +67,20 @@ const DEFAULT_SETTINGS = {
   themeMode: 'auto',
   colorPalette: 'forest',
   themeColor: PALETTE_COLORS.forest,
+  language: 'zh',
   automationSafetyVersion: AUTOMATION_SAFETY_VERSION,
   cropStrategyVersion: CROP_STRATEGY_VERSION
+};
+
+// 主进程侧文案的中英文切换（窗口标题、系统对话框、通知、托盘）。
+// 后端进度/错误消息保持中文原样发出，由 renderer 在展示时用同一份词典翻译，
+// 主进程逻辑与测试不受语言影响；豆包窗口标题里的进度文案用 rendererI18n 就地翻译
+const rendererI18n = require('./renderer/i18n');
+let currentLanguage = 'zh';
+const mt = (zh, en) => (currentLanguage === 'en' ? en : zh);
+const setAppLanguage = (language) => {
+  currentLanguage = language === 'en' ? 'en' : 'zh';
+  rendererI18n.init(currentLanguage);
 };
 
 let mainWindow;
@@ -89,6 +101,11 @@ const busyWindows = new Set();
 // 全局在用的历史会话 ID：同一会话不能被两个任务同时写入。
 // 必须跨批次共享——「重新生成」与「涂抹重绘」同一张图是两个独立批次，也会指向同一会话
 const inUseConversations = new Set();
+// 安全验证是会话级风控：多线程下多个窗口会同时弹验证，让用户一个个做体验极差。
+// 全局只选一个「领头」窗口弹出验证（owner 记录领头任务的令牌），其余任务静默暂停等待；
+// 领头完成验证后 verificationEpoch 递增广播重启信号，所有被波及的任务自动整体重跑
+const verificationGate = { owner: null };
+const verificationEpoch = { value: 0 };
 let tempFileSeq = 0;
 
 // 并发批次可能同时写同一文件，临时文件名必须唯一，避免 rename 竞态
@@ -118,20 +135,26 @@ async function loadSettings() {
     ...DEFAULT_SETTINGS,
     outputDirectory: defaultOutputDirectory()
   };
+  let settings;
   try {
     const saved = JSON.parse(await fs.readFile(settingsPath(), 'utf8'));
-    return sanitizeSettings({
+    settings = sanitizeSettings({
       ...defaults,
       ...saved,
       themeColor: saved.themeColor || PALETTE_COLORS[saved.colorPalette] || defaults.themeColor
     });
   } catch {
     // 首次启动（settings.json 不存在）也要走 sanitize，补齐 maxConcurrentTasks 等派生字段
-    return sanitizeSettings(defaults);
+    settings = sanitizeSettings(defaults);
   }
+  setAppLanguage(settings.language);
+  return settings;
 }
 
 function sanitizeSettings(input = {}) {
+  const language = input.language === 'en' ? 'en' : 'zh';
+  const defaultPrompt = language === 'en' ? DEFAULT_PROMPT_EN : DEFAULT_PROMPT;
+  const defaultManualPrompt = language === 'en' ? MANUAL_EDIT_PROMPT_EN : MANUAL_EDIT_PROMPT;
   const colorPalette = COLOR_PALETTES.has(input.colorPalette) ? input.colorPalette : 'forest';
   const fallbackThemeColor = PALETTE_COLORS[colorPalette] || PALETTE_COLORS.forest;
   const themeColor = typeof input.themeColor === 'string' && /^#[0-9a-f]{6}$/i.test(input.themeColor)
@@ -141,10 +164,10 @@ function sanitizeSettings(input = {}) {
     outputDirectory: typeof input.outputDirectory === 'string' && input.outputDirectory
       ? path.resolve(input.outputDirectory)
       : defaultOutputDirectory(),
-    prompt: typeof input.prompt === 'string' && input.prompt.trim() ? input.prompt.trim().slice(0, 4000) : DEFAULT_PROMPT,
+    prompt: typeof input.prompt === 'string' && input.prompt.trim() ? input.prompt.trim().slice(0, 4000) : defaultPrompt,
     manualEditPrompt: typeof input.manualEditPrompt === 'string' && input.manualEditPrompt.trim()
       ? input.manualEditPrompt.trim().slice(0, 4000)
-      : MANUAL_EDIT_PROMPT,
+      : defaultManualPrompt,
     ...STABLE_PROCESSING_SETTINGS,
     cropEdge: input.cropEdge === 'bottom' ? 'bottom' : 'top',
     cropPercent: Math.min(25, Math.max(10, Number(input.cropPercent) || 10)),
@@ -157,6 +180,7 @@ function sanitizeSettings(input = {}) {
     themeMode: THEME_MODES.has(input.themeMode) ? input.themeMode : 'auto',
     colorPalette,
     themeColor,
+    language,
     automationSafetyVersion: AUTOMATION_SAFETY_VERSION,
     cropStrategyVersion: CROP_STRATEGY_VERSION
   };
@@ -164,6 +188,14 @@ function sanitizeSettings(input = {}) {
 
 async function saveSettings(settings) {
   const sanitized = sanitizeSettings(settings);
+  if (sanitized.language !== currentLanguage) {
+    // 切换语言时提示词整体重置为对应语言的默认版本：提示词是发给豆包的指令，
+    // 自定义文本无法自动翻译，跟随语言给出对应语言的完整默认（切回时同样重置）
+    sanitized.prompt = sanitized.language === 'en' ? DEFAULT_PROMPT_EN : DEFAULT_PROMPT;
+    sanitized.manualEditPrompt = sanitized.language === 'en' ? MANUAL_EDIT_PROMPT_EN : MANUAL_EDIT_PROMPT;
+    setAppLanguage(sanitized.language);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(mt('水印清理工作台', 'Watermark Lab'));
+  }
   await fs.mkdir(path.dirname(settingsPath()), { recursive: true });
   const temporary = uniqueTemporaryPath(settingsPath());
   await fs.writeFile(temporary, JSON.stringify(sanitized, null, 2), 'utf8');
@@ -336,18 +368,19 @@ function applyPlatformWindowTweaks(window) {
 }
 
 function createMainWindow() {
+  // 默认尺寸即最小尺寸：保证右侧设置区在中英文下都完整放下、永不出现滚动
   mainWindow = new BrowserWindow({
-    width: 1140,
-    height: 736,
-    minWidth: 940,
-    minHeight: 630,
+    width: 1160,
+    height: 792,
+    minWidth: 1160,
+    minHeight: 792,
     backgroundColor: '#f5f4ef',
     icon: APP_ICON_PATH,
     // Windows 无边框：隐藏系统标题栏，用 titleBarOverlay 保留原生最小化/最大化/关闭（含 Win11 贴靠布局）；
     // 鸿蒙无边框窗口没有三键（无法关闭/最小化），必须用系统默认边框
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : (IS_OHOS ? 'default' : 'hidden'),
     ...(process.platform === 'win32' ? { titleBarOverlay: { color: '#eef3f0', symbolColor: '#33423b', height: 40 } } : {}),
-    title: '水印清理工作台',
+    title: mt('水印清理工作台', 'Watermark Lab'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -511,7 +544,7 @@ function createDoubaoWindow({ focus = true } = {}) {
     minWidth: 780,
     minHeight: 620,
     show: focus,
-    title: '豆包网页 · 水印清理工作台',
+    title: mt('豆包网页 · 水印清理工作台', 'Doubao Web · Watermark Lab'),
     backgroundColor: '#ffffff',
     webPreferences: {
       partition: DOUBAO_PARTITION,
@@ -568,7 +601,7 @@ function createAuxWorkerWindow(position) {
     minWidth: 780,
     minHeight: 620,
     show: false,
-    title: `豆包网页 · 并行任务 ${position + 2}`,
+    title: mt(`豆包网页 · 并行任务 ${position + 2}`, `Doubao Web · Worker ${position + 2}`),
     backgroundColor: '#ffffff',
     webPreferences: {
       partition: DOUBAO_PARTITION,
@@ -759,8 +792,6 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     workers: useParallel ? windows.length : 1
   });
   const results = [];
-  // 批次级安全验证信号：任一任务完成验证后递增，正在执行的其他任务据此整任务重启
-  const verificationEpoch = { value: 0 };
 
   const processAttempt = async (index, workerWindow, epochRef) => {
     const file = files[index];
@@ -776,6 +807,8 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     };
     batchEvent({ type: 'job-start', ...jobBase });
 
+    // 本次尝试的验证领头令牌：占住 verificationGate 期间只有本任务弹出验证窗口
+    const verificationToken = { batchId, index };
     const automation = new DoubaoAutomation(workerWindow, {
       isCancelled: () => cancelRef.value,
       // 信号值大于本任务基线，说明有任务完成了安全验证：本任务也可能已被波及，整任务重启
@@ -784,31 +817,35 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
       onProgress: (message) => {
         batchEvent({ type: 'job-progress', ...jobBase, message });
         if (workerWindow && !workerWindow.isDestroyed()) {
-          workerWindow.setTitle(`${message} · 水印清理工作台`);
+          workerWindow.setTitle(`${rendererI18n.t(message)} · ${mt('水印清理工作台', 'Watermark Lab')}`);
         }
       },
+      // 返回 false = 已有其他窗口在验证（本任务是跟随者）：不弹窗，静默等待领头完成后自动重跑。
+      // 验证是会话级风控，做完一次全会话生效，只需要让用户做一次
       onVerificationRequired: () => {
-        const persistentSession = session.fromPartition(DOUBAO_PARTITION);
-        const doubaoWindows = BrowserWindow.getAllWindows().filter((window) =>
-          window !== mainWindow && !window.isDestroyed() && window.webContents.session === persistentSession
-        );
-        for (const window of doubaoWindows) {
-          if (window.isMinimized()) window.restore();
-          window.show();
-          window.moveTop();
+        if (verificationGate.owner && verificationGate.owner !== verificationToken) return false;
+        verificationGate.owner = verificationToken;
+        const focusTarget = (workerWindow && !workerWindow.isDestroyed() && workerWindow) || browser;
+        if (focusTarget && !focusTarget.isDestroyed()) {
+          if (focusTarget.isMinimized()) focusTarget.restore();
+          focusTarget.show();
+          focusTarget.moveTop();
+          focusTarget.focus();
         }
         if (process.platform === 'darwin') app.focus({ steal: true });
-        const focusTarget = (workerWindow && !workerWindow.isDestroyed() && workerWindow) || doubaoWindows.at(-1) || browser;
-        focusTarget.focus();
         batchEvent({ type: 'verification-required', ...jobBase });
+        return true;
       },
-      onVerificationCleared: () => {
+      onVerificationCleared: async () => {
+        // 只有领头任务的验证完成才广播重启信号；跟随者的页面偶发自行恢复时只重跑自己
+        if (verificationGate.owner !== verificationToken) return;
+        verificationGate.owner = null;
         verificationEpoch.value += 1;
+        batchEvent({ type: 'verification-cleared', ...jobBase });
         if (!settings.showBrowserWindow) {
           if (workerWindow && !workerWindow.isDestroyed()) workerWindow.hide();
           hideIdleDoubaoWindows();
         }
-        batchEvent({ type: 'verification-cleared', ...jobBase });
       }
     });
 
@@ -871,7 +908,7 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
           onProgress: (message) => {
             batchEvent({ type: 'job-progress', ...jobBase, message });
             if (workerWindow && !workerWindow.isDestroyed()) {
-              workerWindow.setTitle(`${message} · 水印清理工作台`);
+              workerWindow.setTitle(`${rendererI18n.t(message)} · ${mt('水印清理工作台', 'Watermark Lab')}`);
             }
           }
         });
@@ -935,6 +972,8 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
       results.push(result);
       batchEvent({ type: 'job-error', ...result });
     } finally {
+      // 任务以任何方式结束（含取消、验证超时）都要释放验证领头资格，否则后续验证无人弹窗
+      if (verificationGate.owner === verificationToken) verificationGate.owner = null;
       if (taskConversationId) inUseConversations.delete(taskConversationId);
       if (paddedUpload?.directory) {
         await fs.rm(paddedUpload.directory, { recursive: true, force: true }).catch(() => {});
@@ -943,7 +982,7 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
   };
 
   // 安全验证完成后整任务重启：验证中断后豆包可能假死或静默放弃生成，重跑是最可靠的恢复。
-  // 每个任务最多重启 2 次；多线程下同批正在执行的任务也会收到信号一并重启
+  // 每个任务最多重启 2 次；重启信号是全局的，多线程/并发批次里正在执行的任务都会一并重跑
   const processAt = async (index, workerWindow) => {
     const maxVerificationRestarts = 2;
     const epochRef = { value: verificationEpoch.value };
@@ -967,6 +1006,15 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
         results.push(result);
         batchEvent({ type: 'job-error', ...result });
         return;
+      }
+      // 验证是会话级风控，领头窗口做完一次全部窗口都解除；但本窗口页面上残留的
+      // 验证浮层不会自己消失，重跑前先整体重载回聊天页冲掉残留浮层，
+      // 避免把它误判成需要再次验证、接力弹出第二个验证窗口
+      if (workerWindow && !workerWindow.isDestroyed()) {
+        await Promise.race([
+          workerWindow.loadURL(DOUBAO_CHAT_URL).catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 15_000))
+        ]);
       }
       epochRef.value = verificationEpoch.value;
       batchEvent({
@@ -1016,15 +1064,15 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
       const isManual = mode === 'manual';
       const title = cancelled
-        ? (isManual ? '局部重绘已停止' : '批量处理已停止')
+        ? (isManual ? mt('局部重绘已停止', 'Local retouch stopped') : mt('批量处理已停止', 'Batch stopped'))
         : failedCount > 0
-          ? (isManual ? '局部重绘失败' : '批量处理完成，但有失败')
-          : (isManual ? '局部重绘完成' : '批量处理全部完成');
+          ? (isManual ? mt('局部重绘失败', 'Local retouch failed') : mt('批量处理完成，但有失败', 'Batch finished with failures'))
+          : (isManual ? mt('局部重绘完成', 'Local retouch done') : mt('批量处理全部完成', 'Batch complete'));
       const body = cancelled
-        ? `已停止，完成 ${completedCount}/${files.length} 张`
+        ? mt(`已停止，完成 ${completedCount}/${files.length} 张`, `Stopped — ${completedCount}/${files.length} done`)
         : failedCount > 0
-          ? `成功 ${completedCount} 张，失败 ${failedCount} 张，点击查看详情`
-          : `${completedCount} 张图片已保存到输出目录`;
+          ? mt(`成功 ${completedCount} 张，失败 ${failedCount} 张，点击查看详情`, `${completedCount} succeeded, ${failedCount} failed — click for details`)
+          : mt(`${completedCount} 张图片已保存到输出目录`, `${completedCount} image(s) saved to the output folder`);
       const notification = new Notification({ title, body });
       notification.on('click', () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1173,7 +1221,7 @@ async function openImagePreviewWindow(payload) {
         .catch(() => null)
     : null;
   if (previewWindow && !previewWindow.isDestroyed()) {
-    previewWindow.setTitle(`预览 · ${preview.name}`);
+    previewWindow.setTitle(`${mt('预览', 'Preview')} · ${preview.name}`);
     previewWindow.webContents.send('preview:load', preview);
     if (previewWindow.isMinimized()) previewWindow.restore();
     previewWindow.show();
@@ -1188,7 +1236,7 @@ async function openImagePreviewWindow(payload) {
     minHeight: 520,
     backgroundColor: '#101714',
     icon: APP_ICON_PATH,
-    title: `预览 · ${preview.name}`,
+    title: `${mt('预览', 'Preview')} · ${preview.name}`,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 18 } : undefined,
     show: false,
@@ -1223,7 +1271,7 @@ async function openManualEditWindow(payload = {}) {
   }
   const file = { path: sourcePath, name: path.basename(sourcePath) };
   if (manualWindow && !manualWindow.isDestroyed()) {
-    manualWindow.setTitle(`手动涂抹 · ${file.name}`);
+    manualWindow.setTitle(`${mt('手动涂抹', 'Brush retouch')} · ${file.name}`);
     manualWindow.webContents.send('manual:load', file);
     if (manualWindow.isMinimized()) manualWindow.restore();
     manualWindow.show();
@@ -1238,7 +1286,7 @@ async function openManualEditWindow(payload = {}) {
     minHeight: 520,
     backgroundColor: '#101714',
     icon: APP_ICON_PATH,
-    title: `手动涂抹 · ${file.name}`,
+    title: `${mt('手动涂抹', 'Brush retouch')} · ${file.name}`,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 18 } : undefined,
     show: false,
@@ -1280,7 +1328,7 @@ function openAdvancedSettingsWindow() {
     minHeight: 620,
     backgroundColor: '#f5f4ef',
     icon: APP_ICON_PATH,
-    title: '高级处理设置',
+    title: mt('高级处理设置', 'Advanced settings'),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     trafficLightPosition: process.platform === 'darwin' ? { x: 18, y: 18 } : undefined,
     show: false,
@@ -1327,9 +1375,9 @@ function registerIpc() {
   ipcMain.handle('login:status', getLoginStatus);
   ipcMain.handle('files:select', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择要去水印的图片',
+      title: mt('选择要去水印的图片', 'Choose images to clean'),
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: '图片', extensions: [...SUPPORTED_EXTENSIONS].map((item) => item.slice(1)) }]
+      filters: [{ name: mt('图片', 'Images'), extensions: [...SUPPORTED_EXTENSIONS].map((item) => item.slice(1)) }]
     });
     return result.canceled ? [] : validateImagePaths(result.filePaths);
   });
@@ -1375,7 +1423,7 @@ function registerIpc() {
   });
   ipcMain.handle('output:select', async (_event, currentDirectory) => {
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: '选择输出文件夹',
+      title: mt('选择输出文件夹', 'Choose the output folder'),
       defaultPath: currentDirectory || (IS_OHOS ? app.getPath('userData') : app.getPath('pictures')),
       properties: ['openDirectory', 'createDirectory']
     });
@@ -1398,11 +1446,11 @@ function registerIpc() {
     if (!paths.length) return { exported: 0 };
     const now = new Date();
     const pad = (value) => String(value).padStart(2, '0');
-    const defaultName = `水印清理结果-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.zip`;
+    const defaultName = `${mt('水印清理结果', 'watermark-lab-export')}-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.zip`;
     const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-      title: '导出为 ZIP',
+      title: mt('导出为 ZIP', 'Export as ZIP'),
       defaultPath: path.join(app.getPath('downloads'), defaultName),
-      filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }]
+      filters: [{ name: mt('ZIP 压缩包', 'ZIP archive'), extensions: ['zip'] }]
     });
     if (canceled || !filePath) return { cancelled: true };
     // zip 内文件名按输出文件名，重名时追加序号
@@ -1482,10 +1530,10 @@ async function checkMacUpdate() {
   try {
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '发现新版本',
-      message: `新版本 ${latest} 已发布（当前 ${app.getVersion()}）`,
-      detail: '由于应用未做 Apple 签名，macOS 无法自动安装更新。点击“立即下载”将为你下载安装包并打开，拖入「应用程序」替换即可。',
-      buttons: ['立即下载', '稍后'],
+      title: mt('发现新版本', 'Update available'),
+      message: mt(`新版本 ${latest} 已发布（当前 ${app.getVersion()}）`, `Version ${latest} is out (current ${app.getVersion()})`),
+      detail: mt('由于应用未做 Apple 签名，macOS 无法自动安装更新。点击“立即下载”将为你下载安装包并打开，拖入「应用程序」替换即可。', 'The app is not Apple-signed, so macOS cannot auto-install updates. Click "Download now" to fetch and open the installer, then drag it into Applications to replace the old version.'),
+      buttons: [mt('立即下载', 'Download now'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
       noLink: true
@@ -1507,10 +1555,10 @@ async function checkMacUpdate() {
     await fs.writeFile(target, buffer);
     const openChoice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '下载完成',
-      message: `新版本 ${latest} 安装包已下载完成`,
-      detail: '打开 dmg 后把应用拖入「应用程序」替换旧版即可。',
-      buttons: ['打开安装包', '稍后'],
+      title: mt('下载完成', 'Download complete'),
+      message: mt(`新版本 ${latest} 安装包已下载完成`, `The version ${latest} installer has been downloaded`),
+      detail: mt('打开 dmg 后把应用拖入「应用程序」替换旧版即可。', 'Open the dmg and drag the app into Applications to replace the old version.'),
+      buttons: [mt('打开安装包', 'Open installer'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
       noLink: true
@@ -1541,10 +1589,10 @@ async function checkPortableUpdate() {
   try {
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '发现新版本',
-      message: `新版本 ${latest} 已发布（当前 ${app.getVersion()}）`,
-      detail: '将下载新版便携包到当前软件所在目录，下载完成后关闭软件、运行新文件即可。',
-      buttons: ['立即下载', '稍后'],
+      title: mt('发现新版本', 'Update available'),
+      message: mt(`新版本 ${latest} 已发布（当前 ${app.getVersion()}）`, `Version ${latest} is out (current ${app.getVersion()})`),
+      detail: mt('将下载新版便携包到当前软件所在目录，下载完成后关闭软件、运行新文件即可。', 'The new portable build will be downloaded next to the current app; close the app and run the new file when done.'),
+      buttons: [mt('立即下载', 'Download now'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
       noLink: true
@@ -1567,10 +1615,10 @@ async function checkPortableUpdate() {
     }
     const doneChoice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '下载完成',
-      message: `新版本 ${latest} 便携包已下载完成`,
-      detail: `已保存到：${path.dirname(target)}\n关闭软件后运行新的 ${asset.name} 即可，旧文件可手动删除。`,
-      buttons: ['打开所在目录', '好的'],
+      title: mt('下载完成', 'Download complete'),
+      message: mt(`新版本 ${latest} 便携包已下载完成`, `The version ${latest} portable build has been downloaded`),
+      detail: mt(`已保存到：${path.dirname(target)}\n关闭软件后运行新的 ${asset.name} 即可，旧文件可手动删除。`, `Saved to: ${path.dirname(target)}\nClose the app and run the new ${asset.name}; the old file can be deleted.`),
+      buttons: [mt('打开所在目录', 'Show in folder'), mt('好的', 'OK')],
       defaultId: 0,
       cancelId: 1,
       noLink: true
@@ -1613,10 +1661,10 @@ function setupAutoUpdater() {
     const version = info?.version ? ` ${info.version}` : '';
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'info',
-      title: '更新已就绪',
-      message: `新版本${version}已下载完成`,
-      detail: '重启应用后即可使用新版本；选择“稍后”则下次退出时自动安装。',
-      buttons: ['立即重启', '稍后'],
+      title: mt('更新已就绪', 'Update ready'),
+      message: mt(`新版本${version}已下载完成`, `Version${version} has been downloaded`),
+      detail: mt('重启应用后即可使用新版本；选择“稍后”则下次退出时自动安装。', 'Restart to use the new version; choose "Later" to install automatically on next quit.'),
+      buttons: [mt('立即重启', 'Restart now'), mt('稍后', 'Later')],
       defaultId: 0,
       cancelId: 1,
       noLink: true
@@ -1635,6 +1683,8 @@ app.whenReady().then(async () => {
   // 应用不使用系统菜单栏（macOS 顶部菜单与 Windows 窗口菜单一并移除）
   Menu.setApplicationMenu(null);
   registerEditShortcuts();
+  // 最先读设置：托盘菜单、窗口标题等主进程侧文案都需要知道当前语言
+  const settings = await loadSettings();
   // 鸿蒙系统限制：窗口的显示/隐藏与托盘强绑定，创建窗口前必须先有托盘，
   // 否则工作窗口 hide/show（隐藏处理、验证时弹出）会失效
   if (IS_OHOS) {
@@ -1642,8 +1692,8 @@ app.whenReady().then(async () => {
       ohosTray = new Tray(nativeImage.createFromPath(APP_ICON_PATH));
       ohosTray.setToolTip(APP_DISPLAY_NAME);
       ohosTray.setContextMenu(Menu.buildFromTemplate([
-        { label: '打开主窗口', click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); } },
-        { label: '退出', click: () => app.quit() }
+        { label: mt('打开主窗口', 'Open main window'), click: () => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show(); } },
+        { label: mt('退出', 'Quit'), click: () => app.quit() }
       ]));
     } catch (error) {
       console.warn(`鸿蒙托盘创建失败（窗口显隐可能受影响）：${error?.message || error}`);
@@ -1656,7 +1706,6 @@ app.whenReady().then(async () => {
   createMainWindow();
   setupAutoUpdater();
   // 按当前主题色着色 Dock/窗口图标与 Windows 标题栏按钮（窗口创建后调用一并生效）
-  const settings = await loadSettings();
   applyAppearanceSideEffects(settings);
   nativeTheme.on('updated', () => {
     if (lastAppliedSettings?.themeMode === 'auto') applyAppearanceSideEffects(lastAppliedSettings);

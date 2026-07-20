@@ -1,5 +1,14 @@
 'use strict';
 
+const t = (key, params) => window.wlI18n.t(key, params);
+// 语言就绪后再渲染文案：主进程发来 onLoad 前先取一次设置拿语言
+const i18nReady = window.manualBridge.getSettings()
+  .then((settings) => {
+    window.wlI18n.init(settings.language);
+    window.wlI18n.applyDom();
+  })
+  .catch(() => {});
+
 const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
 const elements = {
   title: document.querySelector('#manualTitle'),
@@ -152,10 +161,10 @@ async function loadSource(file) {
   activeStroke = null;
   cursorPosition = { x: 0.5, y: 0.5 };
   resetView();
-  document.title = `手动涂抹 · ${file.name}`;
-  elements.title.textContent = `手动涂抹 · ${file.name}`;
-  elements.meta.textContent = '请在原图上覆盖需要豆包重新处理的位置';
-  elements.loading.textContent = '正在载入原图…';
+  document.title = t('手动涂抹 · {name}', { name: file.name });
+  elements.title.textContent = t('手动涂抹 · {name}', { name: file.name });
+  elements.meta.textContent = t('请在原图上覆盖需要豆包重新处理的位置');
+  elements.loading.textContent = t('正在载入原图…');
   elements.loading.classList.remove('is-hidden');
   elements.canvas.classList.add('is-hidden');
   elements.brushCursor.classList.add('is-hidden');
@@ -169,25 +178,25 @@ async function loadSource(file) {
       baseImage = image;
       elements.canvas.width = image.naturalWidth;
       elements.canvas.height = image.naturalHeight;
-      elements.meta.textContent = `原图 ${preview.width} × ${preview.height} · 涂抹轨迹会按原始分辨率发送`;
+      elements.meta.textContent = t('原图 {w} × {h} · 涂抹轨迹会按原始分辨率发送', { w: preview.width, h: preview.height });
       elements.loading.classList.add('is-hidden');
       elements.canvas.classList.remove('is-hidden');
       redrawCanvas();
       requestAnimationFrame(updateBrushCursor);
     };
     image.onerror = () => {
-      elements.loading.textContent = '原图载入失败，请关闭窗口重试';
+      elements.loading.textContent = t('原图载入失败，请关闭窗口重试');
     };
     image.src = preview.dataUrl;
   } catch (error) {
-    elements.loading.textContent = error.message || String(error);
+    elements.loading.textContent = t(error.message || String(error));
   }
 }
 
 function submitStrokes() {
   if (!sourceFile || !strokes.length) return;
   elements.send.disabled = true;
-  elements.send.textContent = '正在发送…';
+  elements.send.textContent = t('正在发送…');
   window.manualBridge.submit({
     sourcePath: sourceFile.path,
     strokes: strokes.map((stroke) => stroke.map((point) => ({ x: point.x, y: point.y }))),
@@ -196,7 +205,10 @@ function submitStrokes() {
   window.manualBridge.close();
 }
 
-window.manualBridge.onLoad((file) => { loadSource(file); });
+window.manualBridge.onLoad(async (file) => {
+  await i18nReady;
+  loadSource(file);
+});
 
 elements.brushSize.addEventListener('input', redrawCanvas);
 elements.undo.addEventListener('click', () => {

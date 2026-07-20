@@ -1,6 +1,7 @@
 'use strict';
 
 const api = window.advancedBridge;
+const t = (key, params) => window.wlI18n.t(key, params);
 
 const elements = {
   prompt: document.querySelector('#advancedPrompt'),
@@ -105,7 +106,7 @@ async function save() {
     });
     api.close();
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
     elements.saveButton.disabled = false;
   }
 }
@@ -122,6 +123,8 @@ document.addEventListener('keydown', (event) => {
 
 (async () => {
   settings = await api.getSettings();
+  window.wlI18n.init(settings.language);
+  window.wlI18n.applyDom();
   applyAppearance(settings);
   fillForm(settings);
 })();

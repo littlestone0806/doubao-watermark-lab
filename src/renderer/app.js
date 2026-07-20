@@ -1,6 +1,7 @@
 'use strict';
 
 const api = window.watermarkLab;
+const t = (key, params) => window.wlI18n.t(key, params);
 const state = {
   files: [],
   running: false,
@@ -32,6 +33,7 @@ const elements = {
   advancedSettingsButton: document.querySelector('#advancedSettingsButton'),
   showBrowserWindow: document.querySelector('#showBrowserWindow'),
   themeModeButtons: [...document.querySelectorAll('[data-theme-mode]')],
+  languageButtons: [...document.querySelectorAll('[data-language]')],
   paletteButtons: [...document.querySelectorAll('[data-palette]')],
   themeColor: document.querySelector('#themeColor'),
   themeColorValue: document.querySelector('#themeColorValue'),
@@ -100,8 +102,17 @@ function applySettings(settings) {
   syncProcessingControls();
   elements.outputPath.textContent = settings.outputDirectory;
   elements.outputPath.title = settings.outputDirectory;
-  const edgeName = settings.cropEdge === 'bottom' ? '底部' : '顶部';
-  elements.strategySummaryText.textContent = `${edgeName}添加 ${formatPercent(settings.cropPercent)} 临时隔离带，白边补偿 ${formatPercent(settings.cropCompensationPercent)}。`;
+  const edgeName = settings.cropEdge === 'bottom' ? t('底部') : t('顶部');
+  elements.strategySummaryText.textContent = t('{edge}添加 {p} 临时隔离带，白边补偿 {q}。', {
+    edge: edgeName,
+    p: formatPercent(settings.cropPercent),
+    q: formatPercent(settings.cropCompensationPercent)
+  });
+  elements.languageButtons.forEach((button) => {
+    const active = button.dataset.language === (settings.language || 'zh');
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
 }
 
 const PRESET_COLORS = Object.freeze({
@@ -158,7 +169,7 @@ async function openPreview(file) {
   try {
     await api.openPreviewWindow({ targetPath: file.outputPath, sourcePath: file.path });
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 }
 
@@ -166,7 +177,7 @@ async function openManualEditor(file) {
   try {
     await api.openManualWindow({ path: file.path, name: file.name });
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 }
 
@@ -182,7 +193,7 @@ async function startBatchForFiles(files) {
     files.forEach((file) => { file.regenRequested = false; });
     if (state.activeBatches.size) renderQueue();
     else setRunning(false);
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 }
 
@@ -192,7 +203,7 @@ async function regenerateFile(file) {
   if (file.missing || file.regenRequested || file.status === 'active') return;
   const maxConcurrent = state.settings?.maxConcurrentTasks || 3;
   if (state.activeBatches.size >= maxConcurrent) {
-    toast(`最多同时处理 ${maxConcurrent} 张图片，请等待其中一张完成`, 'error');
+    toast(t('最多同时处理 {n} 张图片，请等待其中一张完成', { n: maxConcurrent }), 'error');
     return;
   }
   updateFile(file.path, { regenRequested: true });
@@ -205,7 +216,7 @@ async function handleManualSubmitted(payload = {}) {
   if (!sourcePath || !strokes.length) return;
   const maxConcurrent = state.settings?.maxConcurrentTasks || 3;
   if (state.activeBatches.size >= maxConcurrent) {
-    toast(`最多同时处理 ${maxConcurrent} 张图片，请等待其中一张完成`, 'error');
+    toast(t('最多同时处理 {n} 张图片，请等待其中一张完成', { n: maxConcurrent }), 'error');
     return;
   }
   const file = state.files.find((item) => item.path === sourcePath);
@@ -223,7 +234,7 @@ async function handleManualSubmitted(payload = {}) {
     if (state.activeBatches.size) renderQueue();
     else setRunning(false);
     if (file) updateFile(file.path, { status: file.outputPath ? 'complete' : 'error', message: '' });
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 }
 
@@ -254,7 +265,7 @@ function syncProcessingControls() {
 
 function syncActionState() {
   const selectedCount = state.files.filter((file) => file.selected !== false).length;
-  elements.queueCount.textContent = `${state.files.length} 张`;
+  elements.queueCount.textContent = t('{n} 张', { n: state.files.length });
   elements.startCount.textContent = String(selectedCount);
   elements.startButton.disabled = state.running || !selectedCount || !state.loggedIn;
   elements.clearButton.disabled = state.running || !state.files.length;
@@ -342,8 +353,8 @@ function makeQueueItem(file, index) {
   check.type = 'checkbox';
   check.checked = file.selected !== false;
   check.disabled = state.running;
-  check.title = '勾选后参与本次批处理';
-  check.setAttribute('aria-label', `选择 ${file.name}`);
+  check.title = t('勾选后参与本次批处理');
+  check.setAttribute('aria-label', t('选择 {name}', { name: file.name }));
   check.addEventListener('click', (event) => event.stopPropagation());
   check.addEventListener('change', () => {
     file.selected = check.checked;
@@ -372,22 +383,22 @@ function makeQueueItem(file, index) {
     const isRaw = file.captureSource === 'api-raw';
     const isFallback = !isRaw && file.removedUploadPadding === true;
     flag.className = `capture-flag ${isRaw ? 'is-raw' : isFallback ? 'is-fallback' : 'is-page'}`;
-    flag.textContent = isRaw ? '直取原图' : isFallback ? '降级裁切' : '页面采集';
+    flag.textContent = isRaw ? t('直取原图') : isFallback ? t('降级裁切') : t('页面采集');
     flag.title = isRaw
-      ? '已从豆包接口直取无水印原图：未加隔离带、未裁切'
+      ? t('已从豆包接口直取无水印原图：未加隔离带、未裁切')
       : isFallback
-        ? '接口未拦截到无水印原图，已自动加隔离带重发并完成裁切'
-        : '接口未拦截到无水印原图，已使用页面生成结果（未加隔离带）';
+        ? t('接口未拦截到无水印原图，已自动加隔离带重发并完成裁切')
+        : t('接口未拦截到无水印原图，已使用页面生成结果（未加隔离带）');
     copy.append(flag);
   }
   if (file.status === 'complete' && file.qc && file.qc.verdict !== 'ok') {
     const flag = document.createElement('span');
     flag.className = 'qc-flag';
     const percent = (file.qc.changedRatio * 100).toFixed(1);
-    flag.textContent = file.qc.verdict === 'unchanged' ? '质检：疑似未处理' : '质检：差异过大';
+    flag.textContent = file.qc.verdict === 'unchanged' ? t('质检：疑似未处理') : t('质检：差异过大');
     flag.title = file.qc.verdict === 'unchanged'
-      ? `与原图相比变化像素仅 ${percent}%，疑似没有实际处理；点击"预览"查看差异热力图`
-      : `与原图相比变化像素达 ${percent}%，差异异常大；点击"预览"查看差异热力图`;
+      ? t('与原图相比变化像素仅 {p}%，疑似没有实际处理；点击"预览"查看差异热力图', { p: percent })
+      : t('与原图相比变化像素达 {p}%，差异异常大；点击"预览"查看差异热力图', { p: percent });
     copy.append(flag);
   }
 
@@ -401,34 +412,34 @@ function makeQueueItem(file, index) {
     regenerateButton.disabled = Boolean(file.missing) || Boolean(file.regenRequested);
     regenerateButton.classList.toggle('is-pending', Boolean(file.regenRequested));
     regenerateButton.title = file.missing
-      ? '原图已移动或删除，无法重新生成'
+      ? t('原图已移动或删除，无法重新生成')
       : file.regenRequested
-        ? '正在发起重新生成…'
-        : '重新生成（接回该图片的历史对话）';
-    regenerateButton.setAttribute('aria-label', '重新生成');
+        ? t('正在发起重新生成…')
+        : t('重新生成（接回该图片的历史对话）');
+    regenerateButton.setAttribute('aria-label', t('重新生成'));
     regenerateButton.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>';
     regenerateButton.addEventListener('click', () => regenerateFile(file));
     const previewButton = document.createElement('button');
     previewButton.className = 'result-action-button preview-result';
     previewButton.type = 'button';
-    previewButton.textContent = '预览';
+    previewButton.textContent = t('预览');
     previewButton.addEventListener('click', () => openPreview(file));
     const manualButton = document.createElement('button');
     manualButton.className = 'result-action-button manual-result';
     manualButton.type = 'button';
-    manualButton.textContent = '涂抹重绘';
+    manualButton.textContent = t('涂抹重绘');
     manualButton.disabled = Boolean(file.missing);
-    manualButton.title = file.missing ? '原图已移动或删除，无法手动涂抹' : '在原图上涂抹后重新发送';
+    manualButton.title = file.missing ? t('原图已移动或删除，无法手动涂抹') : t('在原图上涂抹后重新发送');
     manualButton.addEventListener('click', () => openManualEditor(file));
     status.append(regenerateButton, previewButton, manualButton);
   } else {
     const statusTitle = document.createElement('strong');
-    statusTitle.textContent = file.message || (file.selected === false && !file.status ? '本次跳过' : '等待处理');
+    statusTitle.textContent = t(file.message || (file.selected === false && !file.status ? '本次跳过' : '等待处理'));
     statusTitle.title = statusTitle.textContent;
     const statusMeta = document.createElement('span');
     statusMeta.textContent = file.status === 'error'
-      ? '可以重新开始任务重试'
-      : `队列 #${String(index + 1).padStart(2, '0')}`;
+      ? t('可以重新开始任务重试')
+      : t('队列 #{index}', { index: String(index + 1).padStart(2, '0') });
     status.append(statusTitle, statusMeta);
   }
 
@@ -436,7 +447,7 @@ function makeQueueItem(file, index) {
   remove.className = 'remove-button';
   remove.type = 'button';
   remove.textContent = '×';
-  remove.title = '移除';
+  remove.title = t('移除');
   remove.disabled = state.running;
   remove.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -489,15 +500,15 @@ async function addFiles(files) {
   const additions = files.filter((file) => !existing.has(file.path));
   state.files.push(...additions.map((file) => ({ ...file, status: '', message: '', selected: true })));
   renderQueue();
-  if (files.length && !additions.length) toast('这些图片已经在队列中');
+  if (files.length && !additions.length) toast(t('这些图片已经在队列中'));
 }
 
 function updateLogin(status) {
   state.loggedIn = Boolean(status?.loggedIn);
   elements.loginPill.classList.toggle('is-online', state.loggedIn);
   elements.loginPill.classList.toggle('is-offline', !state.loggedIn);
-  elements.loginText.textContent = state.loggedIn ? '豆包已登录 · 状态已保存' : '豆包未登录';
-  elements.loginButtonText.textContent = state.loggedIn ? '打开豆包' : '登录豆包';
+  elements.loginText.textContent = state.loggedIn ? t('豆包已登录 · 状态已保存') : t('豆包未登录');
+  elements.loginButtonText.textContent = state.loggedIn ? t('打开豆包') : t('登录豆包');
   elements.logoutButton.classList.toggle('is-hidden', !state.loggedIn);
   elements.logoutButton.disabled = state.running;
   syncActionState();
@@ -522,7 +533,7 @@ function handleBatchEvent(event) {
     const firstBatch = state.activeBatches.size === 0;
     state.activeBatches.add(batchId);
     if (firstBatch) setRunning(true);
-    if (event.parallel) toast(`多线程模式已开启：${event.workers || 3} 张图片同时处理`);
+    if (event.parallel) toast(t('多线程模式已开启：{n} 张图片同时处理', { n: event.workers || 3 }));
     if (event.mode === 'manual' && event.path) {
       updateFile(event.path, { status: 'active', message: '准备局部重绘', progress: 5 });
     } else if (firstBatch) {
@@ -551,10 +562,10 @@ function handleBatchEvent(event) {
     });
   }
   if (event.type === 'verification-required') {
-    toast('豆包触发了安全验证，已暂停任务并显示验证窗口，请手动完成');
+    toast(t('豆包触发了安全验证，已暂停任务并显示验证窗口，请手动完成'));
   }
   if (event.type === 'verification-cleared') {
-    toast('安全验证已完成，正在重新开始被中断的任务');
+    toast(t('安全验证已完成，正在重新开始被中断的任务'));
   }
   if (event.type === 'job-complete') {
     const source = state.files.find((file) => file.path === event.sourcePath);
@@ -590,9 +601,9 @@ function handleBatchEvent(event) {
       renderQueue();
       persistQueueNow().catch((error) => console.error('保存质检记录失败', error));
       if (event.qc.verdict === 'unchanged') {
-        toast(`${event.name}：质检提示结果与原图几乎无差异，建议预览确认或重新生成`, 'error');
+        toast(t('{name}：质检提示结果与原图几乎无差异，建议预览确认或重新生成', { name: event.name }), 'error');
       } else if (event.qc.verdict === 'different') {
-        toast(`${event.name}：质检提示结果与原图差异过大，请预览确认`, 'error');
+        toast(t('{name}：质检提示结果与原图差异过大，请预览确认', { name: event.name }), 'error');
       }
     }
   }
@@ -604,7 +615,7 @@ function handleBatchEvent(event) {
       regenRequested: false,
       ...(event.conversationId ? { conversationId: event.conversationId } : {})
     });
-    toast(`${event.name}：${event.error}`, 'error');
+    toast(t('{name}：{error}', { name: event.name, error: t(event.error) }), 'error');
   }
   if (event.type === 'batch-complete') {
     state.activeBatches.delete(event.batchId || 'default');
@@ -619,18 +630,18 @@ function handleBatchEvent(event) {
       });
       renderQueue();
     }
-    if (event.cancelled) toast(event.mode === 'manual' ? '局部重绘已停止' : '批处理已停止');
-    else if (event.failed) toast(event.mode === 'manual' ? '局部重绘失败，请调整涂抹区域后重试' : `处理结束：成功 ${event.completed} 张，失败 ${event.failed} 张`, 'error');
-    else toast(event.mode === 'manual' ? '局部重绘完成，点击预览查看结果' : `全部完成，共导出 ${event.completed} 张图片`);
+    if (event.cancelled) toast(event.mode === 'manual' ? t('局部重绘已停止') : t('批处理已停止'));
+    else if (event.failed) toast(event.mode === 'manual' ? t('局部重绘失败，请调整涂抹区域后重试') : t('处理结束：成功 {a} 张，失败 {b} 张', { a: event.completed, b: event.failed }), 'error');
+    else toast(event.mode === 'manual' ? t('局部重绘完成，点击预览查看结果') : t('全部完成，共导出 {n} 张图片', { n: event.completed }));
   }
 }
 
 elements.loginButton.addEventListener('click', async () => {
   try {
     const result = await api.openLogin();
-    if (!result?.alreadyLoggedIn) toast('已打开豆包登录界面，登录状态会自动保存');
+    if (!result?.alreadyLoggedIn) toast(t('已打开豆包登录界面，登录状态会自动保存'));
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 });
 
@@ -639,9 +650,9 @@ elements.logoutButton.addEventListener('click', async () => {
   try {
     await api.logout();
     updateLogin({ loggedIn: false });
-    toast('已退出豆包登录，并清除本工具保存的登录状态');
+    toast(t('已退出豆包登录，并清除本工具保存的登录状态'));
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   } finally {
     elements.logoutButton.disabled = state.running;
   }
@@ -700,10 +711,10 @@ elements.dropZone.addEventListener('drop', async (event) => {
   if (state.running) return;
   const paths = await collectDroppedPaths(event.dataTransfer);
   if (!paths.length) {
-    toast('拖入的内容里没有可处理的图片', 'error');
+    toast(t('拖入的内容里没有可处理的图片'), 'error');
     return;
   }
-  if (paths.length >= MAX_DROP_PATHS) toast(`图片较多，已先添加前 ${MAX_DROP_PATHS} 张`);
+  if (paths.length >= MAX_DROP_PATHS) toast(t('图片较多，已先添加前 {n} 张', { n: MAX_DROP_PATHS }));
   addFiles(await api.validatePaths(paths));
 });
 
@@ -732,12 +743,12 @@ document.addEventListener('paste', async (event) => {
     const file = await api.saveClipboardImage(await blob.arrayBuffer(), blob.type);
     if (file) {
       await addFiles([file]);
-      toast('已从剪贴板添加图片');
+      toast(t('已从剪贴板添加图片'));
     } else {
-      toast('剪贴板图片保存失败', 'error');
+      toast(t('剪贴板图片保存失败'), 'error');
     }
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 });
 
@@ -764,6 +775,13 @@ elements.themeModeButtons.forEach((button) => button.addEventListener('click', a
   state.settings = await api.saveSettings({ ...readSettings(), themeMode: button.dataset.themeMode });
   applySettings(state.settings);
 }));
+// 切换语言后整窗口重载：静态文案在加载时按语言就地替换，重载是最可靠的全量刷新方式
+elements.languageButtons.forEach((button) => button.addEventListener('click', async () => {
+  if ((state.settings?.language || 'zh') === button.dataset.language) return;
+  await persistQueueNow().catch(() => {});
+  state.settings = await api.saveSettings({ ...readSettings(), language: button.dataset.language });
+  location.reload();
+}));
 elements.paletteButtons.forEach((button) => button.addEventListener('click', async () => {
   state.settings = await api.saveSettings({
     ...readSettings(),
@@ -784,7 +802,7 @@ elements.themeColor.addEventListener('input', () => {
 function setAppearancePopover(open) {
   elements.appearanceColors.classList.toggle('is-hidden', !open);
   elements.appearanceToggle.setAttribute('aria-expanded', String(open));
-  elements.appearanceToggle.title = open ? '收起颜色设置' : '展开颜色设置';
+  elements.appearanceToggle.title = open ? t('收起颜色设置') : t('展开颜色设置');
 }
 elements.appearanceToggle.addEventListener('click', (event) => {
   event.stopPropagation();
@@ -801,7 +819,7 @@ document.addEventListener('keydown', (event) => {
 elements.advancedSettingsButton.addEventListener('click', () => api.openAdvancedSettings());
 api.onSettingsUpdated((settings) => {
   applySettings(settings);
-  toast('高级处理设置已保存');
+  toast(t('高级处理设置已保存'));
 });
 
 elements.outputButton.addEventListener('click', async () => {
@@ -818,7 +836,7 @@ elements.openOutputButton.addEventListener('click', () => api.openPath(state.set
 elements.exportZipButton.addEventListener('click', async () => {
   const targets = state.files.filter((file) => file.status === 'complete' && file.outputPath && file.selected !== false);
   if (!targets.length) {
-    toast('请先勾选要导出的已完成任务');
+    toast(t('请先勾选要导出的已完成任务'));
     return;
   }
   elements.exportZipButton.disabled = true;
@@ -826,23 +844,23 @@ elements.exportZipButton.addEventListener('click', async () => {
     const result = await api.exportZip(targets.map((file) => file.outputPath));
     if (result?.cancelled) return;
     if (result?.exported) {
-      toast(`已导出 ${result.exported} 张图片：${result.zipPath}`);
+      toast(t('已导出 {n} 张图片：{path}', { n: result.exported, path: result.zipPath }));
     } else {
-      toast('没有可导出的图片');
+      toast(t('没有可导出的图片'));
     }
   } catch (error) {
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   } finally {
     syncActionState();
   }
 });
 elements.cancelButton.addEventListener('click', async () => {
   elements.cancelButton.disabled = true;
-  elements.cancelButton.textContent = '正在停止…';
+  elements.cancelButton.textContent = t('正在停止…');
   await api.cancelBatch();
   setTimeout(() => {
     elements.cancelButton.disabled = false;
-    elements.cancelButton.textContent = '停止任务';
+    elements.cancelButton.textContent = t('停止任务');
   }, 1500);
 });
 
@@ -861,7 +879,7 @@ elements.startButton.addEventListener('click', async () => {
   } catch (error) {
     if (state.activeBatches.size) renderQueue();
     else setRunning(false);
-    toast(error.message || String(error), 'error');
+    toast(t(error.message || String(error)), 'error');
   }
 });
 
@@ -870,15 +888,18 @@ api.onBatchEvent(handleBatchEvent);
 api.onManualSubmitted(handleManualSubmitted);
 api.onAppEvent((event) => {
   if (event?.type === 'update-available') {
-    toast(`发现新版本 ${event.version}，正在后台下载，完成后会提示重启`);
+    toast(t('发现新版本 {v}，正在后台下载，完成后会提示重启', { v: event.version }));
   }
   if (event?.type === 'update-downloading') {
-    toast(`正在下载新版本 ${event.version} 安装包，请稍候…`);
+    toast(t('正在下载新版本 {v} 安装包，请稍候…', { v: event.version }));
   }
 });
 
 async function initialize() {
-  applySettings(await api.getSettings());
+  const settings = await api.getSettings();
+  window.wlI18n.init(settings.language);
+  window.wlI18n.applyDom();
+  applySettings(settings);
   state.files = (await api.getQueueRecords()).map((record) => ({
     ...record,
     selected: typeof record.selected === 'boolean' ? record.selected : record.status !== 'complete'
@@ -888,4 +909,4 @@ async function initialize() {
   renderQueue();
 }
 
-initialize().catch((error) => toast(error.message || String(error), 'error'));
+initialize().catch((error) => toast(t(error.message || String(error)), 'error'));

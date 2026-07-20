@@ -161,6 +161,12 @@ function pageVerificationState(patternSource) {
     .join('\n')
     .trim();
   const bodyText = document.body?.innerText || '';
+  // 图形验证通过后豆包可能追加手机号/短信验证：这一步常与「验证成功」文案相继或同屏出现，
+  // 不能让成功文案否决它，否则会在用户输手机号时误判完成、把窗口收起来
+  const phoneVerifyPattern = /手机号(?:验证|校验)|验证手机号|绑定手机|短信验证码|获取(?:短信)?验证码|输入(?:短信)?验证码/i;
+  if (phoneVerifyPattern.test(`${text}\n${bodyText.slice(0, 1500)}`)) {
+    return { detected: true, summary: text.replace(/\s+/g, ' ').slice(0, 160) };
+  }
   const hasSpecificChallengeCopy = /请选择所有符合(?:上|下)文描述的图片|拖拽到下方|verify you are human/i.test(bodyText);
   const hasChallengeFrame = candidates.some((element) => element.tagName === 'IFRAME'
     && /captcha|verify|challenge|secsdk|geetest/i.test(`${element.src || ''} ${element.name || ''} ${element.title || ''}`));
@@ -659,22 +665,47 @@ class DoubaoAutomation {
     if (!first?.detected) return { waitedMs: 0, detected: false };
 
     const wasVisible = this.window.isVisible();
-    if (this.window.isMinimized()) this.window.restore();
-    this.window.show();
-    this.window.moveTop();
-    this.window.focus();
+    // 弹窗决策交给调度方：回调返回 false 表示已有其他窗口在验证中（本任务是跟随者），
+    // 不弹出本窗口，静默等待领头任务完成验证后随重启信号一起重跑。
+    // 没有回调时（直接使用自动化层）退回旧行为：自己弹出窗口
+    let isLeader = true;
     if (this.onVerificationRequired) {
-      await Promise.resolve(this.onVerificationRequired({ wasVisible })).catch(() => {});
+      const decision = await Promise.resolve(this.onVerificationRequired({ wasVisible })).catch(() => true);
+      isLeader = decision !== false;
+    } else {
+      if (this.window.isMinimized()) this.window.restore();
+      this.window.show();
+      this.window.moveTop();
+      this.window.focus();
     }
-    this.onProgress('检测到豆包安全验证：任务已暂停，请在豆包窗口手动完成');
+    this.onProgress(isLeader
+      ? '检测到豆包安全验证：任务已暂停，请在豆包窗口手动完成'
+      : '检测到安全验证：另一个窗口正在验证，完成一次即可，本任务已暂停等待自动重跑');
     const started = Date.now();
     while (Date.now() - started < maxWaitMs) {
       assertNotCancelled(this.isCancelled);
+      // 领头任务完成验证后会广播重启信号：跟随者立即中断等待，整任务重跑
+      assertNotRestarted(this.shouldRestart);
       await sleep(1200);
       const current = await runInPage(this.webContents, pageVerificationState, VERIFICATION_PATTERN.source)
         .catch(() => ({ detected: true }));
       if (!current?.detected) {
-        await sleep(1000);
+        // 图形验证通过后豆包可能紧接着弹手机号验证，中间隔着成功动画/过渡页：
+        // 连续多轮确认页面确实干净才算真正完成，避免在过渡瞬间收起窗口、
+        // 让用户看不到手机号验证界面
+        let confirmed = true;
+        for (let round = 0; round < 3; round += 1) {
+          await sleep(1500);
+          assertNotCancelled(this.isCancelled);
+          assertNotRestarted(this.shouldRestart);
+          const again = await runInPage(this.webContents, pageVerificationState, VERIFICATION_PATTERN.source)
+            .catch(() => ({ detected: true }));
+          if (again?.detected) {
+            confirmed = false;
+            break;
+          }
+        }
+        if (!confirmed) continue;
         if (this.onVerificationCleared) {
           await Promise.resolve(this.onVerificationCleared({ wasVisible })).catch(() => {});
         } else if (!wasVisible && !this.window.isDestroyed()) {

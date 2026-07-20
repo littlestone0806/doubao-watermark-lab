@@ -1,5 +1,14 @@
 'use strict';
 
+const t = (key, params) => window.wlI18n.t(key, params);
+// 语言就绪后再渲染文案：主进程发来 onLoad 前先取一次设置拿语言
+const i18nReady = window.previewBridge.getSettings()
+  .then((settings) => {
+    window.wlI18n.init(settings.language);
+    window.wlI18n.applyDom();
+  })
+  .catch(() => {});
+
 const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
 const elements = {
   title: document.querySelector('#previewTitle'),
@@ -48,7 +57,7 @@ function applyTransform() {
   clampPan();
   elements.stack.style.transform = `translate3d(${panX}px, ${panY}px, 0) scale(${zoom})`;
   elements.stack.classList.toggle('is-zoomed', zoom > 1);
-  elements.zoomValue.textContent = zoom === 1 ? '适合' : `${Math.round(zoom * 100)}%`;
+  elements.zoomValue.textContent = zoom === 1 ? t('适合') : `${Math.round(zoom * 100)}%`;
   elements.zoomOut.disabled = zoom <= ZOOM_LEVELS[0];
   elements.zoomIn.disabled = zoom >= ZOOM_LEVELS.at(-1);
 }
@@ -126,12 +135,13 @@ function setDiff(enabled) {
   elements.diffBadge.classList.toggle('is-hidden', !diffing);
   // 差异模式下副标题显示质检统计
   elements.meta.textContent = diffing && qcStats
-    ? `${baseMeta} · 变化像素 ${(qcStats.changedRatio * 100).toFixed(1)}%`
+    ? `${baseMeta}${t(' · 变化像素 {p}%', { p: (qcStats.changedRatio * 100).toFixed(1) })}`
     : baseMeta;
 }
 
-window.previewBridge.onLoad((preview) => {
-  document.title = `预览 · ${preview.name}`;
+window.previewBridge.onLoad(async (preview) => {
+  await i18nReady;
+  document.title = t('预览 · {name}', { name: preview.name });
   elements.title.textContent = preview.name;
   baseMeta = `${preview.width} × ${preview.height}`;
   elements.meta.textContent = baseMeta;
@@ -163,7 +173,7 @@ window.previewBridge.onLoad((preview) => {
   elements.image.src = preview.dataUrl;
   if (sourceAvailable) {
     elements.sourceImage.src = preview.source.dataUrl;
-    elements.sourceImage.alt = `原图 · ${preview.source.width} × ${preview.source.height}`;
+    elements.sourceImage.alt = t('原图 · {w} × {h}', { w: preview.source.width, h: preview.source.height });
   } else {
     elements.sourceImage.removeAttribute('src');
   }
