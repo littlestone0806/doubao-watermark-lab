@@ -28,14 +28,23 @@ function dosDateTime(date = new Date()) {
   return { time, day };
 }
 
+// 经典 ZIP（非 ZIP64）的 32 位字段上限：条目大小与偏移都不能超过 4GB
+const ZIP32_MAX = 0xFFFFFFFF;
+
 // entries: [{ name, path }]，按顺序写入；返回写入的文件数
 async function writeZipFile(targetPath, entries) {
   const handle = await fs.open(targetPath, 'w');
   const central = [];
   let offset = 0;
+  let completed = false;
   try {
     for (const entry of entries) {
       const data = await fs.readFile(entry.path);
+      // 本实现不支持 ZIP64：单文件或累计偏移超过 4GB 时提前给出明确报错，
+      // 避免 writeUInt32LE 抛 RangeError 并留下损坏的 zip
+      if (data.length > ZIP32_MAX || offset + 30 + Buffer.byteLength(entry.name) + data.length > ZIP32_MAX) {
+        throw new Error('导出内容总大小超过 ZIP 4GB 上限，请减少勾选数量后分批导出');
+      }
       const name = Buffer.from(String(entry.name).replace(/\\/g, '/'), 'utf8');
       const crc = crc32(data);
       const { time, day } = dosDateTime();
@@ -87,8 +96,11 @@ async function writeZipFile(targetPath, entries) {
     end.writeUInt32LE(offset - centralStart, 12);
     end.writeUInt32LE(centralStart, 16);
     await handle.write(end);
+    completed = true;
   } finally {
     await handle.close();
+    // 中途失败（读文件出错、超出 4GB 上限等）时删掉残缺的 zip，不留损坏文件
+    if (!completed) await fs.rm(targetPath, { force: true }).catch(() => {});
   }
   return central.length;
 }

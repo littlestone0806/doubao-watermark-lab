@@ -45,18 +45,6 @@ const elements = {
   cancelButton: document.querySelector('#cancelButton'),
   startButton: document.querySelector('#startButton'),
   startCount: document.querySelector('#startCount'),
-  previewModal: document.querySelector('#previewModal'),
-  previewBackdrop: document.querySelector('#previewBackdrop'),
-  previewTitle: document.querySelector('#previewTitle'),
-  previewMeta: document.querySelector('#previewMeta'),
-  previewClose: document.querySelector('#previewClose'),
-  previewLoading: document.querySelector('#previewLoading'),
-  previewImage: document.querySelector('#previewImage'),
-  previewStage: document.querySelector('#previewStage'),
-  previewZoomOut: document.querySelector('#previewZoomOut'),
-  previewZoomReset: document.querySelector('#previewZoomReset'),
-  previewZoomIn: document.querySelector('#previewZoomIn'),
-  previewZoomValue: document.querySelector('#previewZoomValue'),
   toastRegion: document.querySelector('#toastRegion'),
   thumbPopover: document.querySelector('#thumbPopover'),
   thumbPopoverImage: document.querySelector('#thumbPopoverImage')
@@ -163,78 +151,6 @@ function applyAppearance(settings) {
     button.classList.toggle('is-active', active);
     button.setAttribute('aria-pressed', String(active));
   });
-}
-
-const ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5];
-let previewRequest = 0;
-let previewZoom = 1;
-let previewPanX = 0;
-let previewPanY = 0;
-let previewPointer = null;
-
-function clampPreviewPan() {
-  const imageWidth = elements.previewImage.clientWidth * previewZoom;
-  const imageHeight = elements.previewImage.clientHeight * previewZoom;
-  const maxX = Math.max(0, (imageWidth - elements.previewStage.clientWidth) / 2 + 16);
-  const maxY = Math.max(0, (imageHeight - elements.previewStage.clientHeight) / 2 + 16);
-  previewPanX = Math.min(maxX, Math.max(-maxX, previewPanX));
-  previewPanY = Math.min(maxY, Math.max(-maxY, previewPanY));
-}
-
-function applyPreviewTransform() {
-  clampPreviewPan();
-  elements.previewImage.style.transform = `translate3d(${previewPanX}px, ${previewPanY}px, 0) scale(${previewZoom})`;
-  elements.previewImage.classList.toggle('is-zoomed', previewZoom > 1);
-  elements.previewZoomValue.textContent = previewZoom === 1 ? '适合' : `${Math.round(previewZoom * 100)}%`;
-  elements.previewZoomOut.disabled = previewZoom <= ZOOM_LEVELS[0];
-  elements.previewZoomIn.disabled = previewZoom >= ZOOM_LEVELS.at(-1);
-}
-
-function setPreviewZoom(value, anchorClientX, anchorClientY) {
-  const nextZoom = Math.min(ZOOM_LEVELS.at(-1), Math.max(ZOOM_LEVELS[0], value));
-  if (nextZoom === previewZoom) return;
-  // 以锚点（通常是鼠标指针位置，未传入时为舞台中心）为中心缩放：
-  // 缩放前后保持锚点下的图像点不动
-  const stageRectangle = elements.previewStage.getBoundingClientRect();
-  const anchorX = (typeof anchorClientX === 'number' ? anchorClientX : stageRectangle.left + stageRectangle.width / 2)
-    - (stageRectangle.left + stageRectangle.width / 2);
-  const anchorY = (typeof anchorClientY === 'number' ? anchorClientY : stageRectangle.top + stageRectangle.height / 2)
-    - (stageRectangle.top + stageRectangle.height / 2);
-  const ratio = nextZoom / previewZoom;
-  previewPanX = previewPanX * ratio + anchorX * (1 - ratio);
-  previewPanY = previewPanY * ratio + anchorY * (1 - ratio);
-  previewZoom = nextZoom;
-  if (previewZoom <= 1) {
-    previewPanX = 0;
-    previewPanY = 0;
-  }
-  applyPreviewTransform();
-}
-
-function stepPreviewZoom(direction, anchorClientX, anchorClientY) {
-  const next = direction > 0
-    ? ZOOM_LEVELS.find((level) => level > previewZoom + 0.001)
-    : [...ZOOM_LEVELS].reverse().find((level) => level < previewZoom - 0.001);
-  if (next) setPreviewZoom(next, anchorClientX, anchorClientY);
-}
-
-function resetPreviewView() {
-  previewZoom = 1;
-  previewPanX = 0;
-  previewPanY = 0;
-  previewPointer = null;
-  applyPreviewTransform();
-}
-
-function closePreview() {
-  previewRequest += 1;
-  if (elements.previewModal.contains(document.activeElement)) document.activeElement.blur();
-  elements.previewModal.classList.add('is-hidden');
-  elements.previewModal.setAttribute('aria-hidden', 'true');
-  elements.previewImage.classList.add('is-hidden');
-  elements.previewImage.removeAttribute('src');
-  elements.previewImage.removeAttribute('style');
-  resetPreviewView();
 }
 
 async function openPreview(file) {
@@ -918,72 +834,6 @@ elements.exportZipButton.addEventListener('click', async () => {
     toast(error.message || String(error), 'error');
   } finally {
     syncActionState();
-  }
-});
-elements.previewBackdrop.addEventListener('click', closePreview);
-elements.previewClose.addEventListener('click', closePreview);
-elements.previewZoomOut.addEventListener('click', () => stepPreviewZoom(-1));
-elements.previewZoomIn.addEventListener('click', () => stepPreviewZoom(1));
-elements.previewZoomReset.addEventListener('click', resetPreviewView);
-elements.previewStage.addEventListener('dblclick', (event) => setPreviewZoom(previewZoom === 1 ? 2 : 1, event.clientX, event.clientY));
-elements.previewStage.addEventListener('wheel', (event) => {
-  if (elements.previewModal.classList.contains('is-hidden')) return;
-  event.preventDefault();
-  if (event.metaKey || event.ctrlKey) {
-    stepPreviewZoom(event.deltaY < 0 ? 1 : -1, event.clientX, event.clientY);
-    return;
-  }
-  if (previewZoom > 1) {
-    previewPanX -= event.deltaX;
-    previewPanY -= event.deltaY;
-    applyPreviewTransform();
-  }
-}, { passive: false });
-elements.previewImage.addEventListener('pointerdown', (event) => {
-  if (previewZoom <= 1) return;
-  previewPointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
-  elements.previewImage.setPointerCapture(event.pointerId);
-  elements.previewImage.classList.add('is-dragging');
-});
-elements.previewImage.addEventListener('pointermove', (event) => {
-  if (!previewPointer || previewPointer.id !== event.pointerId) return;
-  previewPanX += event.clientX - previewPointer.x;
-  previewPanY += event.clientY - previewPointer.y;
-  previewPointer.x = event.clientX;
-  previewPointer.y = event.clientY;
-  applyPreviewTransform();
-});
-function endPreviewDrag(event) {
-  if (!previewPointer || previewPointer.id !== event.pointerId) return;
-  previewPointer = null;
-  elements.previewImage.classList.remove('is-dragging');
-}
-elements.previewImage.addEventListener('pointerup', endPreviewDrag);
-elements.previewImage.addEventListener('pointercancel', endPreviewDrag);
-window.addEventListener('resize', () => {
-  if (!elements.previewModal.classList.contains('is-hidden')) applyPreviewTransform();
-});
-document.addEventListener('keydown', (event) => {
-  const previewOpen = !elements.previewModal.classList.contains('is-hidden');
-  if (previewOpen && (event.metaKey || event.ctrlKey)) {
-    if (event.key === '+' || event.key === '=') {
-      event.preventDefault();
-      stepPreviewZoom(1);
-      return;
-    }
-    if (event.key === '-') {
-      event.preventDefault();
-      stepPreviewZoom(-1);
-      return;
-    }
-    if (event.key === '0') {
-      event.preventDefault();
-      resetPreviewView();
-      return;
-    }
-  }
-  if (event.key === 'Escape') {
-    if (previewOpen) closePreview();
   }
 });
 elements.cancelButton.addEventListener('click', async () => {

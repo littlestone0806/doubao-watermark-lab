@@ -438,31 +438,6 @@ h1 { margin: 0; font-family: Georgia, "Songti SC", serif; font-size: 22px; line-
 .button.danger:hover { filter: brightness(.96); }
 .is-hidden { display: none !important; }
 
-.preview-modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 34px; }
-.preview-backdrop { position: absolute; inset: 0; background: rgba(7, 12, 10, .66); backdrop-filter: blur(13px) saturate(130%); -webkit-backdrop-filter: blur(13px) saturate(130%); animation: preview-fade .18s ease; }
-.preview-dialog { position: relative; width: min(1040px, calc(100vw - 68px)); height: min(760px, calc(100vh - 68px)); display: grid; grid-template-rows: 62px minmax(0, 1fr); overflow: hidden; border: 1px solid rgba(255,255,255,.19); border-radius: 19px; background: rgba(16, 23, 20, .82); box-shadow: 0 30px 90px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.12); backdrop-filter: blur(28px); animation: preview-in .2s ease; }
-.preview-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 14px 0 21px; border-bottom: 1px solid var(--line-soft); background: var(--surface-strong); color: var(--ink); }
-.preview-head strong { display: block; max-width: 560px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.preview-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
-.preview-head-actions { display: flex; align-items: center; gap: 9px; }
-.preview-zoom-controls { display: grid; grid-template-columns: 31px 62px 31px; gap: 1px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--input); box-shadow: inset 0 1px 0 var(--glass-highlight); }
-.preview-zoom-controls button { height: 27px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; }
-.preview-zoom-controls button:nth-child(2) { font-size: 9px; font-weight: 800; }
-.preview-zoom-controls button:nth-child(2) span { margin: 0; color: inherit; font-size: inherit; }
-.preview-zoom-controls button:hover:not(:disabled) { background: var(--surface-strong); color: var(--accent); }
-.preview-zoom-controls button:disabled { opacity: .35; cursor: default; }
-.preview-close { width: 34px; height: 34px; border: 0; border-radius: 10px; background: var(--surface-muted); color: var(--muted); cursor: pointer; font-size: 21px; line-height: 1; }
-.preview-close:hover,
-.preview-close:focus-visible { background: var(--accent-soft); color: var(--accent); outline: none; }
-.preview-stage { position: relative; min-height: 0; display: grid; place-items: center; overflow: hidden; padding: 20px; touch-action: none; user-select: none; background-color: var(--checker-a); background-image: linear-gradient(45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--checker-b) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%); background-size: 22px 22px; background-position: 0 0, 0 11px, 11px -11px, -11px 0; }
-.preview-stage img { position: absolute; left: 50%; top: 50%; translate: -50% -50%; display: block; max-width: calc(100% - 32px); max-height: calc(100% - 32px); object-fit: contain; transform-origin: center; border-radius: 4px; box-shadow: 0 15px 54px rgba(0,0,0,.36); will-change: transform; transition: transform .12s ease-out; }
-.preview-stage img.is-zoomed { cursor: grab; }
-.preview-stage img.is-dragging { cursor: grabbing; transition: none; }
-.preview-loading { color: rgba(255,255,255,.72); font-size: 11px; }
-.preview-help { position: absolute; z-index: 3; left: 50%; bottom: 12px; transform: translateX(-50%); padding: 6px 10px; border: 1px solid rgba(255,255,255,.13); border-radius: 999px; background: rgba(8, 13, 11, .48); color: rgba(255,255,255,.62); box-shadow: 0 5px 16px rgba(0,0,0,.12); backdrop-filter: blur(12px); font-size: 8px; white-space: nowrap; pointer-events: none; }
-@keyframes preview-fade { from { opacity: 0; } }
-@keyframes preview-in { from { opacity: 0; transform: translateY(8px) scale(.99); } }
-
 .advanced-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px 0 22px; border-bottom: 1px solid var(--line-soft); background: var(--surface-muted); }
 .advanced-head strong { display: block; font-size: 14px; }
 .advanced-head span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }

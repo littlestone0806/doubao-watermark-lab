@@ -67,7 +67,7 @@
               <span>全选</span>
             </label>
             <button id="clearButton" class="text-button" type="button">清空</button>
-            <label class="interval-control" title="每张图片处理完成后等待的秒数；多线程模式下由系统自动控制节奏">
+            <label class="interval-control" title="每张图片处理完成后等待的秒数；多线程模式下不生效（任务全部同时进行）">
               <span>任务间隔</span>
               <input id="intervalSeconds" type="number" min="0" max="600" step="1" value="30">
               <span>秒</span>
@@ -180,31 +180,6 @@
           </div>
         </aside>
       </main>
-    </div>
-
-    <div id="previewModal" class="preview-modal is-hidden" aria-hidden="true">
-      <div id="previewBackdrop" class="preview-backdrop"></div>
-      <section class="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
-        <header class="preview-head">
-          <div>
-            <strong id="previewTitle">处理结果预览</strong>
-            <span id="previewMeta">正在载入…</span>
-          </div>
-          <div class="preview-head-actions">
-            <div class="preview-zoom-controls" aria-label="预览缩放">
-              <button id="previewZoomOut" type="button" title="缩小（⌘-）" aria-label="缩小">−</button>
-              <button id="previewZoomReset" type="button" title="适合窗口（⌘0）"><span id="previewZoomValue">适合</span></button>
-              <button id="previewZoomIn" type="button" title="放大（⌘+）" aria-label="放大">+</button>
-            </div>
-            <button id="previewClose" class="preview-close" type="button" aria-label="关闭预览">×</button>
-          </div>
-        </header>
-        <div id="previewStage" class="preview-stage">
-          <span id="previewLoading" class="preview-loading">正在载入预览…</span>
-          <img id="previewImage" class="is-hidden" alt="处理结果预览" draggable="false">
-          <div class="preview-help">⌘ + / − 缩放 · ⌘ 0 还原 · 放大后拖拽查看</div>
-        </div>
-      </section>
     </div>
 
     <div id="thumbPopover" class="thumb-popover is-hidden" aria-hidden="true">

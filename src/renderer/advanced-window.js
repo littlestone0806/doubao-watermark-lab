@@ -92,8 +92,11 @@ function fillForm(value) {
 async function save() {
   elements.saveButton.disabled = true;
   try {
+    // 以保存时刻的最新设置为底，只覆盖本窗口管理的字段：
+    // 避免把打开窗口时的旧快照写回，冲掉期间在主窗口做的修改（主题、间隔、输出目录等）
+    const latest = await api.getSettings();
     await api.save({
-      ...settings,
+      ...latest,
       prompt: elements.prompt.value,
       manualEditPrompt: elements.manualPrompt.value,
       cropEdge: elements.cropEdge.value,

@@ -52,7 +52,6 @@ const STABLE_PROCESSING_SETTINGS = Object.freeze({
 });
 const PARALLEL_WORKER_COUNT = 3;
 const MAX_CONCURRENT_LIMIT = 8;
-const PARALLEL_STAGGER_MS = 5_000;
 const DEFAULT_SETTINGS = {
   outputDirectory: '',
   prompt: DEFAULT_PROMPT,
@@ -87,6 +86,9 @@ let activeBatchCount = 0;
 let batchSeq = 0;
 const activeCancelRefs = new Set();
 const busyWindows = new Set();
+// 全局在用的历史会话 ID：同一会话不能被两个任务同时写入。
+// 必须跨批次共享——「重新生成」与「涂抹重绘」同一张图是两个独立批次，也会指向同一会话
+const inUseConversations = new Set();
 let tempFileSeq = 0;
 
 // 并发批次可能同时写同一文件，临时文件名必须唯一，避免 rename 竞态
@@ -124,7 +126,8 @@ async function loadSettings() {
       themeColor: saved.themeColor || PALETTE_COLORS[saved.colorPalette] || defaults.themeColor
     });
   } catch {
-    return defaults;
+    // 首次启动（settings.json 不存在）也要走 sanitize，补齐 maxConcurrentTasks 等派生字段
+    return sanitizeSettings(defaults);
   }
 }
 
@@ -250,6 +253,10 @@ function sanitizeQueueRecord(record = {}) {
     cropPercent: Math.max(0, Number(record.cropPercent) || 0),
     cropEdge: record.cropEdge === 'bottom' ? 'bottom' : 'top',
     removedUploadPadding: Boolean(record.removedUploadPadding),
+    // 采集来源随队列持久化，重启后「直取原图/降级裁切/页面采集」徽标仍在
+    captureSource: ['api-raw', 'network', 'dom', 'canvas', 'canvas-screenshot', 'editor-download'].includes(record.captureSource)
+      ? record.captureSource
+      : '',
     // 质检结论随队列持久化，重启后黄标仍在
     ...(record.qc && typeof record.qc === 'object' ? {
       qc: {
@@ -412,24 +419,42 @@ async function broadcastLoginStatus() {
     persistentSession.flushStorageData();
     clearInterval(loginTimer);
     loginTimer = null;
+    // 只收掉空闲的豆包窗口；正被批次占用（busy）的窗口不能销毁，否则并发中的任务会被打断
     for (const window of BrowserWindow.getAllWindows()) {
-      if (window !== mainWindow && !window.isDestroyed() && window.webContents.session === persistentSession) {
+      if (window !== mainWindow && !window.isDestroyed()
+        && window.webContents.session === persistentSession && !busyWindows.has(window)) {
         window.hide();
         window.destroy();
       }
     }
-    doubaoWindow = null;
+    if (!doubaoWindow || doubaoWindow.isDestroyed()) doubaoWindow = null;
   }
 }
 
 async function waitForDoubaoLoad(browser) {
   if (!browser.webContents.isLoading()) return;
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('豆包页面加载超时')), 35_000);
-    browser.webContents.once('did-finish-load', () => {
+    const cleanup = () => {
       clearTimeout(timer);
+      browser.webContents.removeListener('did-finish-load', onFinish);
+      browser.webContents.removeListener('did-fail-load', onFail);
+    };
+    const onFinish = () => {
+      cleanup();
       resolve();
-    });
+    };
+    // 加载失败（断网、DNS 失败等）立即报错，不再干等超时；子资源失败（isMainFrame=false）忽略
+    const onFail = (_event, errorCode, errorDescription, _url, isMainFrame) => {
+      if (!isMainFrame || errorCode === -3) return; // -3 = ERR_ABORTED，页面内部跳转常见，忽略
+      cleanup();
+      reject(new Error(`豆包页面加载失败（${errorDescription || errorCode}），请检查网络后重试`));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('豆包页面加载超时'));
+    }, 35_000);
+    browser.webContents.on('did-finish-load', onFinish);
+    browser.webContents.on('did-fail-load', onFail);
   });
 }
 
@@ -734,8 +759,6 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     workers: useParallel ? windows.length : 1
   });
   const results = [];
-  // 并行模式下正在被使用的历史会话，避免两个任务同时写进同一会话
-  const inUseConversations = new Set();
   // 批次级安全验证信号：任一任务完成验证后递增，正在执行的其他任务据此整任务重启
   const verificationEpoch = { value: 0 };
 
@@ -790,8 +813,8 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
     });
 
     let taskConversationId = typeof file.conversationId === 'string' ? file.conversationId : '';
-    // 并行时同一会话不能被两个任务同时使用，后来的任务另起新会话
-    if (useParallel && taskConversationId && inUseConversations.has(taskConversationId)) taskConversationId = '';
+    // 同一会话不能被两个任务同时使用（无论并行任务还是并发批次），后来的任务另起新会话
+    if (taskConversationId && inUseConversations.has(taskConversationId)) taskConversationId = '';
     if (taskConversationId) inUseConversations.add(taskConversationId);
     let paddedUpload = null;
     try {
@@ -970,20 +993,15 @@ async function runBatchReserved(items, rawSettings, runtime, { mode, batchId, ca
         }
       }
     } else {
-      // 多线程：每个工作窗口独立取任务；任务启动统一错开 5 秒，降低触发风控的概率
+      // 多线程：每个工作窗口独立取任务，全部同时启动，不做人为错峰。
+      // 每个任务本身要经历开对话/上传/发送多个步骤，各窗口的请求节奏天然错开；
+      // 偶发的安全验证由批次级验证兜底机制处理（暂停 → 手动完成 → 整批自动重启）
       let nextIndex = 0;
-      let lastStartAt = 0;
       const worker = async (workerWindow) => {
         while (!cancelRef.value) {
           const index = nextIndex;
           nextIndex += 1;
           if (index >= files.length) return;
-          if (lastStartAt) {
-            const waitMs = PARALLEL_STAGGER_MS - (Date.now() - lastStartAt);
-            if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-          }
-          if (cancelRef.value) return;
-          lastStartAt = Date.now();
           await processAt(index, workerWindow);
         }
       };
